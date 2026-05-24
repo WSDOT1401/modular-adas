@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zeigertechnik - Gauge Files</title>
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+	* { box-sizing: border-box; margin: 0; padding: 0; }
+	body {
+		min-height: 100vh;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #030201;
+		color: #b17038;
+		font-family: 'Futura', 'Century Gothic', 'Josefin Sans', sans-serif;
+		padding: 24px;
+	}
+	.panel {
+		width: min(720px, 100%);
+		background: #060402;
+		border: 1px solid #130902;
+		border-radius: 16px;
+		padding: 24px;
+		box-shadow: 0 0 60px rgba(180,80,0,0.06), 0 0 120px rgba(180,80,0,0.03);
+	}
+	h1 {
+		font-size: 13px;
+		letter-spacing: 0.28em;
+		text-transform: uppercase;
+		color: #8c4c1f;
+		margin-bottom: 16px;
+	}
+	.list {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		gap: 12px;
+	}
+	a {
+		display: block;
+		text-decoration: none;
+		color: #d7863d;
+		border: 1px solid #2a1406;
+		border-radius: 12px;
+		padding: 14px 12px;
+		letter-spacing: 0.16em;
+		text-transform: uppercase;
+		font-size: 10px;
+		transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+	}
+	a:hover {
+		transform: translateY(-2px);
+		border-color: #7a3e14;
+		color: #ff9b42;
+	}
+	.hint {
+		margin-top: 14px;
+		font-size: 8px;
+		letter-spacing: 0.22em;
+		color: #4e2a0f;
+	}
+</style>
+</head>
+<body>
+	<div class="panel">
+		<h1>Zeigertechnik - Separate Files</h1>
+		<div class="list">
+			<a href="speedo.html">Speedo Gauge</a>
+			<a href="tacho.html">Tacho Gauge</a>
+			<a href="navigation.html">Navigation Dial</a>
+			<a href="zeigertechnik_cluster.html">Original Cluster</a>
+		</div>
+		<div class="hint">&middot; each gauge now lives in its own standalone HTML file &middot;</div>
+	</div>
+</body>
+</html>

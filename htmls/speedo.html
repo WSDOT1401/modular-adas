@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W124 Speedometer</title>
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+	* { box-sizing: border-box; margin: 0; padding: 0; }
+
+	:root {
+		--bg: #11100f;
+		--panel: #1a1816;
+		--panel-edge: #2a2622;
+		--ink: #efefec;
+		--ink-dim: #bebbb6;
+		--accent: #ffa62f;
+		--accent-dim: #d88421;
+	}
+
+	body {
+		min-height: 100vh;
+		display: grid;
+		place-items: center;
+		background:
+			radial-gradient(circle at 50% 40%, #1a1715 0%, #0e0d0c 58%, #060605 100%);
+		font-family: "Futura", "Century Gothic", "Josefin Sans", sans-serif;
+		color: var(--ink);
+		padding: 20px;
+		overflow: hidden;
+	}
+
+	.panel {
+		width: min(700px, 100%);
+		border-radius: 18px;
+		border: 1px solid var(--panel-edge);
+		background: linear-gradient(180deg, #1a1816 0%, #131210 100%);
+		box-shadow:
+			0 30px 80px rgba(0, 0, 0, 0.65),
+			inset 0 1px 0 rgba(255, 255, 255, 0.04);
+		padding: 16px;
+		display: grid;
+		place-items: center;
+		gap: 8px;
+	}
+
+	.title {
+		font-size: 10px;
+		letter-spacing: 0.26em;
+		text-transform: uppercase;
+		color: #8f8b85;
+	}
+
+	canvas {
+		width: min(94vw, 560px);
+		height: min(94vw, 560px);
+		display: block;
+		border-radius: 50%;
+		cursor: pointer;
+	}
+
+	.note {
+		font-size: 8px;
+		letter-spacing: 0.2em;
+		text-transform: uppercase;
+		color: #716b63;
+	}
+
+	body.kiosk {
+		padding: 0;
+		background: #000;
+	}
+
+	body.kiosk .panel {
+		width: 100vw;
+		height: 100vh;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
+	}
+
+	body.kiosk .title,
+	body.kiosk .note {
+		display: none;
+	}
+
+	body.kiosk canvas {
+		width: min(100vmin, 900px);
+		height: min(100vmin, 900px);
+	}
+</style>
+</head>
+<body>
+	<section class="panel">
+		<div class="title">W124 Speedometer</div>
+		<canvas id="speedo" width="560" height="560" aria-label="Digital speedometer"></canvas>
+		<div class="note" id="note">click the gauge to cycle demo speeds</div>
+	</section>
+
+<script>
+const cv = document.getElementById("speedo");
+const ctx = cv.getContext("2d");
+
+const BASE_SIZE = 560;
+const MIN_SPEED = 20;
+const MAX_SPEED = 260;
+const START_DEG = 140;
+const SWEEP_DEG = 260;
+
+const params = new URLSearchParams(window.location.search);
+const IS_KIOSK = params.get("kiosk") === "1";
+const DATA_SOURCE = params.get("source") || "demo";
+const POLL_MS = Number.parseInt(params.get("pollMs") || "120", 10);
+
+const FONT = "'Futura','Century Gothic','Josefin Sans',sans-serif";
+
+let speed = 23;
+let odo = 87266;
+let trip = 0;
+let targetSpeed = 23;
+
+if (IS_KIOSK) {
+	document.body.classList.add("kiosk");
+}
+
+const noteEl = document.getElementById("note");
+if (noteEl && DATA_SOURCE === "state") {
+	noteEl.textContent = "external data mode: polling state.json";
+}
+
+function toRad(d) {
+	return (d * Math.PI) / 180;
+}
+
+function speedToAngle(v) {
+	const t = (v - MIN_SPEED) / (MAX_SPEED - MIN_SPEED);
+	return toRad(START_DEG + t * SWEEP_DEG);
+}
+
+function dprScale() {
+	const maxSize = IS_KIOSK ? 900 : 560;
+	const padX = IS_KIOSK ? 8 : 40;
+	const padY = IS_KIOSK ? 8 : 80;
+	const cssSize = Math.min(window.innerWidth - padX, window.innerHeight - padY, maxSize);
+	const size = Math.max(280, cssSize);
+	const dpr = window.devicePixelRatio || 1;
+
+	cv.style.width = size + "px";
+	cv.style.height = size + "px";
+	cv.width = Math.round(size * dpr);
+	cv.height = Math.round(size * dpr);
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	return size;
+}
+
+function ring(cx, cy, r, c, w) {
+	ctx.beginPath();
+	ctx.arc(cx, cy, r, 0, Math.PI * 2);
+	ctx.strokeStyle = c;
+	ctx.lineWidth = w;
+	ctx.stroke();
+}
+
+function drawStripedMarker(cx, cy, radius) {
+	const a = speedToAngle(60);
+	const midX = cx + (radius - 14) * Math.cos(a);
+	const midY = cy + (radius - 500) * Math.sin(a);
+
+	ctx.save();
+	ctx.translate(midX, midY);
+	ctx.rotate(a + Math.PI / 2);
+
+	const w = 24;
+	const h = 30;
+	ctx.fillStyle = "#1a1713";
+	ctx.fillRect(-w / 2, -h / 2, w, h);
+	ctx.strokeStyle = "#5d564d";
+	ctx.lineWidth = 0.8;
+	ctx.strokeRect(-w / 2, -h / 2, w, h);
+
+	for (let x = -w / 2; x < w / 2 + 8; x += 6) {
+		ctx.beginPath();
+		ctx.moveTo(x, h / 2);
+		ctx.lineTo(x + 9, -h / 2);
+		ctx.strokeStyle = "#f3c34e";
+		ctx.lineWidth = 2.2;
+		ctx.stroke();
+	}
+
+	ctx.restore();
+}
+
+function drawOdometer(cx, y, km) {
+	const cw = 29;
+	const ch = 28;
+	const digits = String(Math.floor(km)).padStart(6, "0");
+	const totalW = cw * 6;
+	const left = cx - totalW / 2;
+
+	ctx.fillStyle = "#11100f";
+	ctx.strokeStyle = "#5f5a53";
+	ctx.lineWidth = 1;
+	ctx.beginPath();
+	ctx.roundRect(left - 6, y - 4, totalW + 12, ch + 8, 3);
+	ctx.fill();
+	ctx.stroke();
+
+	for (let i = 0; i < 6; i++) {
+		const x = left + i * cw;
+		ctx.fillStyle = "#070707";
+		ctx.fillRect(x, y, cw - 1, ch);
+		ctx.strokeStyle = "#2a2927";
+		ctx.lineWidth = 0.6;
+		ctx.strokeRect(x, y, cw - 1, ch);
+
+		ctx.beginPath();
+		ctx.moveTo(x, y + ch / 2);
+		ctx.lineTo(x + cw - 1, y + ch / 2);
+		ctx.strokeStyle = "#151515";
+		ctx.lineWidth = 0.5;
+		ctx.stroke();
+
+		ctx.font = `500 29px ${FONT}`;
+		ctx.fillStyle = "#d9d9d5";
+		ctx.textAlign = "center";
+		ctx.textBaseline = "middle";
+		ctx.fillText(digits[i], x + cw / 2, y + ch / 2 + 1);
+	}
+
+	ctx.font = `600 15px ${FONT}`;
+	ctx.fillStyle = "#deddd9";
+	ctx.textAlign = "center";
+	ctx.fillText("km", cx, y - 14);
+}
+
+function drawTrip(cx, y, val) {
+	const tw = 29;
+	const th = 28;
+	const str = String(Math.floor(val)).padStart(3, "0");
+	const left = cx - (tw * 3) / 2;
+
+	ctx.fillStyle = "#0f0f0f";
+	ctx.strokeStyle = "#4f4a44";
+	ctx.lineWidth = 0.8;
+	ctx.beginPath();
+	ctx.roundRect(left - 5, y - 3, tw * 3 + 10, th + 6, 3);
+	ctx.fill();
+	ctx.stroke();
+
+	for (let i = 0; i < 3; i++) {
+		const x = left + i * tw;
+		ctx.fillStyle = "#050505";
+		ctx.fillRect(x, y, tw - 1, th);
+		ctx.strokeStyle = "#222";
+		ctx.lineWidth = 0.5;
+		ctx.strokeRect(x, y, tw - 1, th);
+
+		ctx.font = `500 29px ${FONT}`;
+		ctx.fillStyle = i === 2 ? "#f0ece4" : "#cfccc5";
+		ctx.textAlign = "center";
+		ctx.textBaseline = "middle";
+		ctx.fillText(str[i], x + tw / 2, y + th / 2 + 0.8);
+	}
+
+	ctx.font = `400 9px ${FONT}`;
+	ctx.fillStyle = "#b8b3ab";
+	ctx.textAlign = "right";
+	ctx.fillText("", left - 6, y + th / 2 + 0.5);
+}
+
+function drawNeedle(cx, cy, value) {
+	const clamped = Math.max(MIN_SPEED, Math.min(MAX_SPEED, value));
+	const a = speedToAngle(clamped);
+	const nL = 240;
+	const nW = 8.5;
+
+	ctx.save();
+	ctx.translate(cx, cy);
+	ctx.rotate(a);
+
+	ctx.shadowColor = "rgba(255, 153, 38, 0.45)";
+	ctx.shadowBlur = 8;
+
+	ctx.beginPath();
+	ctx.moveTo(0, nW * 0.62);
+	ctx.lineTo(0, -nW * 0.62);
+	ctx.lineTo(nL * 0.78, -nW * 0.72);
+	ctx.lineTo(nL * 0.95, -nW * 0.28);
+	ctx.lineTo(nL * 0.95, nW * 0.28);
+	ctx.lineTo(nL * 0.78, nW * 0.72);
+	ctx.closePath();
+	ctx.fillStyle = "#f5932e";
+	ctx.fill();
+
+	ctx.shadowBlur = 0;
+
+	ctx.beginPath();
+	ctx.moveTo(nL * 0.12, -nW * 0.22);
+	ctx.lineTo(nL * 0.86, -nW * 0.14);
+	ctx.lineTo(nL * 0.86, nW * 0.14);
+	ctx.lineTo(nL * 0.12, nW * 0.22);
+	ctx.closePath();
+	ctx.fillStyle = "#ffbe5a";
+	ctx.fill();
+
+	ctx.restore();
+
+	ctx.beginPath();
+	ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+	ctx.fillStyle = "#141311";
+	ctx.fill();
+	ctx.strokeStyle = "#5f5649";
+	ctx.lineWidth = 1.4;
+	ctx.stroke();
+
+}
+
+function drawGauge() {
+	const size = dprScale();
+	const s = size / BASE_SIZE;
+
+	ctx.save();
+	ctx.scale(s, s);
+
+	const cx = BASE_SIZE / 2;
+	const cy = BASE_SIZE / 2;
+	const r = 250;
+
+	ctx.clearRect(0, 0, BASE_SIZE, BASE_SIZE);
+
+	const g = ctx.createRadialGradient(cx, cy - 24, 30, cx, cy, r);
+	g.addColorStop(0, "#30302f");
+	g.addColorStop(0.45, "#242423");
+	g.addColorStop(1, "#141413");
+	ctx.beginPath();
+	ctx.arc(cx, cy, r, 0, Math.PI * 2);
+	ctx.fillStyle = g;
+	ctx.fill();
+
+	ring(cx, cy, r - 1, "#0f0e0d", 2.2);
+	ring(cx, cy, r - 12, "#2d2c2a", 1);
+	ring(cx, cy, r + 5, "#3a3732", 1.2);
+
+	drawStripedMarker(cx, cy, r - 10);
+
+	for (let v = MIN_SPEED; v <= MAX_SPEED; v += 10) {
+		const a = speedToAngle(v);
+		const major = v % 20 === 0;
+		const inner = r - 38;
+		const outer = r - 8;
+		const x1 = cx + inner * Math.cos(a);
+		const y1 = cy + inner * Math.sin(a);
+		const x2 = cx + outer * Math.cos(a);
+		const y2 = cy + outer * Math.sin(a);
+
+		ctx.beginPath();
+		ctx.moveTo(x1, y1);
+		ctx.lineTo(x2, y2);
+		ctx.strokeStyle = major ? "#f1efeb" : "#cbcac6";
+		ctx.lineWidth = major ? 8 : 4;
+		ctx.lineCap = "butt";
+		ctx.stroke();
+
+		if (major) {
+			let lr = r - 62;
+			if (v >= 100 && v <= 160) lr = r - 68;
+			if (v >= 180) lr = r - 74;
+			if (v === 260) lr = r - 62;
+			const lx = cx + lr * Math.cos(a);
+			const ly = cy + lr * Math.sin(a);
+			ctx.font = `500 37px ${FONT}`;
+			ctx.fillStyle = "#ffffff";
+			ctx.textAlign = "center";
+			ctx.textBaseline = "middle";
+			ctx.fillText(String(v), lx, ly);
+		}
+	}
+  drawOdometer(cx, cy - 70, odo);
+	drawTrip(cx, cy + 52, trip);
+	drawNeedle(cx, cy, speed);
+
+	ctx.font = `600 22px ${FONT}`;
+	ctx.fillStyle = "#deddd9";
+	ctx.textAlign = "center";
+	ctx.fillText("km/h", cx, cy + 130);
+
+	ctx.font = `600 10px ${FONT}`;
+	ctx.fillStyle = "#c6c1b9";
+	ctx.fillText("124 542 82 67", cx, cy + 148);
+
+	ctx.font = `700 12px ${FONT}`;
+	ctx.fillStyle = "#dfddd8";
+	ctx.fillText("VDO", cx, cy + 165);
+
+	const vignette = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r * 1.03);
+	vignette.addColorStop(0, "rgba(0,0,0,0)");
+	vignette.addColorStop(1, "rgba(0,0,0,0.33)");
+	ctx.beginPath();
+	ctx.arc(cx, cy, r, 0, Math.PI * 2);
+	ctx.fillStyle = vignette;
+	ctx.fill();
+
+	ctx.restore();
+}
+
+function animate() {
+	speed += (targetSpeed - speed) * 0.11;
+
+	if (DATA_SOURCE === "demo") {
+		const stepKm = Math.max(0, speed) / 3600 / 8;
+		odo += stepKm;
+		trip += stepKm;
+		if (trip >= 1000) trip = 0;
+	}
+
+	drawGauge();
+	requestAnimationFrame(animate);
+}
+
+const demos = [23, 40, 60, 88, 120, 160, 200, 240, 0];
+let demoIndex = 0;
+
+if (DATA_SOURCE === "demo") {
+	cv.addEventListener("click", () => {
+		demoIndex = (demoIndex + 1) % demos.length;
+		targetSpeed = demos[demoIndex];
+	});
+}
+
+function clamp(v, mn, mx) {
+	return Math.max(mn, Math.min(mx, v));
+}
+
+function applyState(data) {
+	if (!data || typeof data !== "object") return;
+	if (typeof data.speed === "number") targetSpeed = clamp(data.speed, MIN_SPEED, MAX_SPEED);
+	if (typeof data.odo === "number") odo = Math.max(0, data.odo);
+	if (typeof data.trip === "number") trip = Math.max(0, data.trip);
+}
+
+async function pollState() {
+	if (DATA_SOURCE !== "state") return;
+	try {
+		const res = await fetch(`state.json?t=${Date.now()}`, { cache: "no-store" });
+		if (!res.ok) return;
+		const payload = await res.json();
+		applyState(payload);
+	} catch (_) {
+		// Keep the last good values; transient read errors are expected during file updates.
+	}
+}
+
+if (DATA_SOURCE === "state") {
+	setInterval(pollState, Number.isFinite(POLL_MS) ? Math.max(50, POLL_MS) : 120);
+	pollState();
+}
+
+window.addEventListener("resize", drawGauge);
+
+drawGauge();
+animate();
+</script>
+</body>
+</html>
