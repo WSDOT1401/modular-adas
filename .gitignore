@@ -1,0 +1,53 @@
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# --- VS Code local workspace state ---
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# --- CMake / C++ build outputs ---
+**/build/
+**/build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+install_manifest.txt
+
+# --- Qt generated/autogen artifacts ---
+**/*_autogen/
+**/*_qmltyperegistrations.cpp
+**/.qt/
+**/.qt_plugins/
+**/.generated/
+**/.rcc/
+
+# --- Qt deployment/runtime copied binaries & plugins ---
+qt_cluster/build-*/**/*.dll
+qt_cluster/build-*/generic/
+qt_cluster/build-*/iconengines/
+qt_cluster/build-*/imageformats/
+qt_cluster/build-*/networkinformation/
+qt_cluster/build-*/platforms/
+qt_cluster/build-*/qml/
+qt_cluster/build-*/qmltooling/
+qt_cluster/build-*/qmltypes/
+qt_cluster/build-*/tls/
+qt_cluster/build-*/translations/
+qt_cluster/build-*/W124Cluster/
+
+# --- Local runtime state / logs ---
+*.log
+*.tmp
+*.bak
+
+# --- Python cache (pi helpers) ---
+__pycache__/
+*.py[cod]
