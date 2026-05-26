@@ -43,6 +43,13 @@ qt_cluster/build-*/tls/
 qt_cluster/build-*/translations/
 qt_cluster/build-*/W124Cluster/
 
+# --- Node.js tooling (PNG generation scripts, etc.) ---
+node_modules/
+package-lock.json
+
+# --- Scratch / temp files ---
+list.txt
+
 # --- Local runtime state / logs ---
 *.log
 *.tmp
