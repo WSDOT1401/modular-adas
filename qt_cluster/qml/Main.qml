@@ -33,13 +33,18 @@ Window {
             if (event.key === Qt.Key_Space && !event.isAutoRepeat) {
                 holdTimer.restart()
                 event.accepted = true
+            } else if ((event.key === Qt.Key_Right || event.key === Qt.Key_M || event.key === Qt.Key_Tab) && !event.isAutoRepeat) {
+                gauge.nextMainAreaMode()
+                event.accepted = true
+            } else if (event.key === Qt.Key_Left && !event.isAutoRepeat) {
+                gauge.previousMainAreaMode()
+                event.accepted = true
             }
         }
 
         Keys.onReleased: function(event) {
             if (event.key === Qt.Key_Space && !event.isAutoRepeat) {
                 holdTimer.stop()
-                // Releasing the key closes the panel (settings already applied live)
                 root.settingsVisible = false
                 event.accepted = true
             }

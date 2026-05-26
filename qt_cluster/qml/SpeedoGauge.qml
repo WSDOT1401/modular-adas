@@ -18,8 +18,8 @@ Item {
     readonly property real startDeg: 140
     readonly property real sweepDeg: 260
 
-    // cluster | carplay | bluetooth | status
-    property string mainAreaMode: "cluster"
+    // classic | music | map  (or aliases: cluster/status→classic, bluetooth→music, carplay→map)
+    property string mainAreaMode: "classic"
     property string statusText: ""
     property string warningText: ""
     property bool warningActive: false
@@ -27,13 +27,15 @@ Item {
     property real shownSpeed: speed
 
     Behavior on shownSpeed {
-        NumberAnimation {
-            duration: 110
-            easing.type: Easing.OutCubic
+        // Moves at a fixed rate (km/h per second) rather than a fixed duration,
+        // so large and small changes feel proportional — just like a real needle.
+        SmoothedAnimation {
+            velocity: 60          // 60 km/h per second: 0→120 in 2 s, 120→60 in 1 s
+            easing.type: Easing.InOutQuad
         }
     }
 
-    DialFace {
+        DialBackground {
         z: 0
         anchors.fill: parent
         fontFamily: root.fontFamily
@@ -41,22 +43,39 @@ Item {
         maxSpeed: root.maxSpeed
         startDeg: root.startDeg
         sweepDeg: root.sweepDeg
+            opacity: 1.0
+        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
     }
 
+        DialScale {
+            z: 1
+            anchors.fill: parent
+            fontFamily: root.fontFamily
+            minSpeed: root.minSpeed
+            maxSpeed: root.maxSpeed
+            startDeg: root.startDeg
+            sweepDeg: root.sweepDeg
+            opacity: root.mainAreaMode === "map" ? 0.0 : 1.0
+            Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
+        }
     Needle {
-        z: 2
+            z: 3
         anchors.fill: parent
         speed: root.shownSpeed
         minSpeed: root.minSpeed
         maxSpeed: root.maxSpeed
         startDeg: root.startDeg
         sweepDeg: root.sweepDeg
+        outlineStyle: root.mainAreaMode === "music"
+        opacity: root.mainAreaMode === "map" ? 0.0 : 1.0
+        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
     }
 
     MainArea {
         id: mainArea
-        z: 1
+            z: 2
         anchors.fill: parent
+        speed: root.shownSpeed
         odometer: root.odometer
         trip: root.trip
         unitText: root.profileUnit
@@ -70,18 +89,31 @@ Item {
 
     Timer {
         id: demoTimer
-        interval: 2200
+        // Short interval so SmoothedAnimation is always "in flight" — needle
+        // never fully settles before the next target arrives, just like real driving.
+        interval: 1800
         running: root.demoMode
         repeat: true
+        property int _idx: 0
+        // Sequence simulates: pull away → city → light highway → city → stop
+        readonly property var _seq: [
+            20, 40, 60, 50, 70, 90, 80, 100,
+            120, 100, 80, 60, 50, 70, 90,
+            120, 160, 140, 120, 100, 80, 60, 40, 20
+        ]
         onTriggered: {
-            const demos = [23, 40, 60, 88, 120, 160, 200, 240, 0]
-            const idx = Math.floor(Math.random() * demos.length)
-            root.speed = demos[idx]
+            _idx = (_idx + 1) % _seq.length
+            root.speed = _seq[_idx]
         }
     }
 
     function nextMainAreaMode() {
         mainArea.nextMode()
+        root.mainAreaMode = mainArea.mode
+    }
+
+    function previousMainAreaMode() {
+        mainArea.previousMode()
         root.mainAreaMode = mainArea.mode
     }
 
