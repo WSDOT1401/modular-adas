@@ -1,5 +1,6 @@
 import QtQuick
 import "mainarea/pages" as Pages
+import "mainarea/carousel" as Carousel
 
 Item {
     id: root
@@ -16,106 +17,25 @@ Item {
     property bool warningActive: false
     property bool connected: true
 
-    // ── Internal transition state ──────────────────────────────────────
-    readonly property var availableModes: ["classic", "music", "map"]
-    property int currentModeIndex: 0
-    property bool animationsEnabled: false
-    property real wrapShift: 0
-    property int wrapDirection: 0   // 1 = next wrap (map->classic), -1 = previous wrap (classic->map)
-    property bool wrapInProgress: false
-    property int pendingModeIndex: -1
-    property bool internalModeChange: false
-
-    function resolveModeName(m) {
-        const aliases = { "cluster": "classic", "status": "classic", "bluetooth": "music", "carplay": "map" }
-        return aliases[m] !== undefined ? aliases[m] : m
-    }
-
-    function pageDelta(pageIndex) {
-        let d = pageIndex - currentModeIndex
-        const n = availableModes.length
-
-        if (wrapInProgress) {
-            if (wrapDirection === 1 && pageIndex < currentModeIndex) d += n
-            if (wrapDirection === -1 && pageIndex > currentModeIndex) d -= n
-        }
-
-        return d
-    }
-
-    function setModeInternal(newIndex) {
-        internalModeChange = true
-        mode = availableModes[newIndex]
-        internalModeChange = false
-    }
-
     function nextMode() {
-        if (wrapInProgress) return
-
-        const n = availableModes.length
-        const isWrap = currentModeIndex === n - 1
-        if (isWrap) {
-            pendingModeIndex = 0
-            wrapDirection = 1
-            wrapInProgress = true
-            setModeInternal(pendingModeIndex)
-            wrapAnim.to = -width
-            wrapAnim.restart()
-            return
-        }
-
-        currentModeIndex = (currentModeIndex + 1) % n
-        setModeInternal(currentModeIndex)
+        carousel.nextMode()
     }
 
     function previousMode() {
-        if (wrapInProgress) return
-
-        const n = availableModes.length
-        const isWrap = currentModeIndex === 0
-        if (isWrap) {
-            pendingModeIndex = n - 1
-            wrapDirection = -1
-            wrapInProgress = true
-            setModeInternal(pendingModeIndex)
-            wrapAnim.to = width
-            wrapAnim.restart()
-            return
-        }
-
-        currentModeIndex = (currentModeIndex - 1 + n) % n
-        setModeInternal(currentModeIndex)
+        carousel.previousMode()
     }
 
-    // Respond to external mode sets (alias resolution)
-    onModeChanged: {
-        if (internalModeChange || wrapInProgress) return
-        const resolved = resolveModeName(mode)
-        const newIdx = availableModes.indexOf(resolved)
-        if (newIdx >= 0 && newIdx !== currentModeIndex) currentModeIndex = newIdx
-    }
+    onModeChanged: carousel.applyExternalMode(mode)
 
-    Component.onCompleted: {
-        const resolved = resolveModeName(mode)
-        const idx = availableModes.indexOf(resolved)
-        currentModeIndex = idx >= 0 ? idx : 0
-        Qt.callLater(function() { animationsEnabled = true })
-    }
+    Carousel.ModeCarousel {
+        id: carousel
+        mode: root.mode
+        pageWidth: root.width
 
-    NumberAnimation {
-        id: wrapAnim
-        target: root
-        property: "wrapShift"
-        from: 0
-        duration: 420
-        easing.type: Easing.OutCubic
-        onFinished: {
-            if (!root.wrapInProgress) return
-            root.currentModeIndex = root.pendingModeIndex
-            root.wrapShift = 0
-            root.wrapDirection = 0
-            root.wrapInProgress = false
-            root.pendingModeIndex = -1
+        Component.onCompleted: initializeFromMode()
+        onResolvedMode: function(newMode) {
+            if (root.mode !== newMode)
+                root.mode = newMode
         }
     }
 
@@ -131,11 +51,13 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: parent.width
-        x: root.pageDelta(pageIndex) * parent.width + root.wrapShift
+        x: carousel.pageDelta(pageIndex) * parent.width + carousel.wrapShift
         Behavior on x {
-            enabled: root.animationsEnabled && !root.wrapInProgress
+            enabled: carousel.animationsEnabled && !carousel.wrapInProgress
             NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
         }
+        opacity: carousel.mode === "classic" ? 1.0 : 0.0
+        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
         Pages.ClassicPage {
             anchors.fill: parent
@@ -154,11 +76,13 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: parent.width
-        x: root.pageDelta(pageIndex) * parent.width + root.wrapShift
+        x: carousel.pageDelta(pageIndex) * parent.width + carousel.wrapShift
         Behavior on x {
-            enabled: root.animationsEnabled && !root.wrapInProgress
+            enabled: carousel.animationsEnabled && !carousel.wrapInProgress
             NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
         }
+        opacity: carousel.mode === "music" ? 1.0 : 0.0
+        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
         Pages.MusicPage {
             anchors.fill: parent
@@ -174,11 +98,13 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: parent.width
-        x: root.pageDelta(pageIndex) * parent.width + root.wrapShift
+        x: carousel.pageDelta(pageIndex) * parent.width + carousel.wrapShift
         Behavior on x {
-            enabled: root.animationsEnabled && !root.wrapInProgress
+            enabled: carousel.animationsEnabled && !carousel.wrapInProgress
             NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
         }
+        opacity: carousel.mode === "map" ? 1.0 : 0.0
+        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
         Pages.MapPage {
             anchors.fill: parent
@@ -201,17 +127,29 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         anchors.verticalCenterOffset: 130 * root._s
     }
-    Text {
+    Row {
         z: 5
         visible: root.mode !== "map"
-        text: "124 542 82 67"
-        color: "#c6c1b9"
-        font.family: root.fontFamily
-        font.pixelSize: Math.round(10 * root._s)
-        font.weight: Font.DemiBold
+        spacing: 3 * root._s
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: 148 * root._s
+        anchors.verticalCenterOffset: 153 * root._s
+
+        Image {
+            source: "qrc:/qt/qml/W124Cluster/assets/images/speedo_logo.png"
+            height: Math.round(8 * root._s)
+            width: height
+            fillMode: Image.PreserveAspectFit
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+            text: "124 542 82 67"
+            color: "#c6c1b9"
+            font.family: root.fontFamily
+            font.pixelSize: Math.round(10 * root._s)
+            font.weight: Font.DemiBold
+            anchors.verticalCenter: parent.verticalCenter
+        }
     }
     Text {
         z: 5
@@ -223,7 +161,7 @@ Item {
         font.weight: Font.Bold
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: 165 * root._s
+        anchors.verticalCenterOffset: 170 * root._s
     }
 
     // ── Warning overlay (floats above all pages) ──────────────────────

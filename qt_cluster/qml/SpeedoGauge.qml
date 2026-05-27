@@ -20,18 +20,33 @@ Item {
 
     // classic | music | map  (or aliases: cluster/status→classic, bluetooth→music, carplay→map)
     property string mainAreaMode: "classic"
+    property bool settingsOpen: false
     property string statusText: ""
     property string warningText: ""
     property bool warningActive: false
 
     property real shownSpeed: speed
 
-    Behavior on shownSpeed {
-        // Moves at a fixed rate (km/h per second) rather than a fixed duration,
-        // so large and small changes feel proportional — just like a real needle.
-        SmoothedAnimation {
-            velocity: 60          // 60 km/h per second: 0→120 in 2 s, 120→60 in 1 s
-            easing.type: Easing.InOutQuad
+    // ── Analog needle spring-damper ──────────────────────────────────────────
+    // Models a real mechanical gauge: mass on a spring with viscous damping.
+    // Equation:  x'' = ω₀²(target − x) − 2ζω₀·x'
+    //   ω₀ = 7.5 rad/s  → natural period ~0.84 s  (snappy but not twitchy)
+    //   ζ  = 0.72        → slightly underdamped:  ~4% overshoot, one soft bounce
+    //
+    // FrameAnimation fires once per rendered frame (vsync-locked), giving the
+    // same 60 fps smoothness as built-in QML animations.
+    property real _needleVel: 0.0   // km/h per second
+
+    FrameAnimation {
+        running: true
+        onTriggered: {
+            const omega = 7.5
+            const zeta  = 0.72
+            const dt    = Math.min(frameTime, 0.05)   // cap at 50 ms (e.g. after tab switch)
+            const err   = root.speed - root.shownSpeed
+            const acc   = omega * omega * err - 2.0 * zeta * omega * root._needleVel
+            root._needleVel  += acc * dt
+            root.shownSpeed  += root._needleVel * dt
         }
     }
 
@@ -48,14 +63,14 @@ Item {
     }
 
         DialScale {
-            z: 1
+            z: 2
             anchors.fill: parent
             fontFamily: root.fontFamily
             minSpeed: root.minSpeed
             maxSpeed: root.maxSpeed
             startDeg: root.startDeg
             sweepDeg: root.sweepDeg
-            opacity: root.mainAreaMode === "map" ? 0.0 : 1.0
+            opacity: root.settingsOpen || root.mainAreaMode === "map" ? 0.0 : 1.0
             Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
         }
     Needle {
@@ -67,13 +82,13 @@ Item {
         startDeg: root.startDeg
         sweepDeg: root.sweepDeg
         outlineStyle: root.mainAreaMode === "music"
-        opacity: root.mainAreaMode === "map" ? 0.0 : 1.0
+        opacity: root.settingsOpen || root.mainAreaMode === "map" ? 0.0 : 1.0
         Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
     }
 
     MainArea {
         id: mainArea
-            z: 2
+            z: 1
         anchors.fill: parent
         speed: root.shownSpeed
         odometer: root.odometer
@@ -85,8 +100,9 @@ Item {
         warningText: root.warningText
         warningActive: root.warningActive
         connected: (typeof vehicleState !== "undefined") ? vehicleState.connected : true
+        opacity: root.settingsOpen ? 0.0 : 1.0
+        Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
     }
-
     Timer {
         id: demoTimer
         // Short interval so SmoothedAnimation is always "in flight" — needle
@@ -103,7 +119,11 @@ Item {
         ]
         onTriggered: {
             _idx = (_idx + 1) % _seq.length
-            root.speed = _seq[_idx]
+            if (typeof vehicleState !== "undefined") {
+                vehicleState.speed = _seq[_idx]
+            } else {
+                root.speed = _seq[_idx]
+            }
         }
     }
 
