@@ -14,12 +14,15 @@ class VehicleState : public QObject {
     Q_PROPERTY(int pollMs READ pollMs WRITE setPollMs NOTIFY pollMsChanged)
     Q_PROPERTY(int profileMaxSpeed READ profileMaxSpeed WRITE setProfileMaxSpeed NOTIFY profileMaxSpeedChanged)
     Q_PROPERTY(QString profileUnit READ profileUnit WRITE setProfileUnit NOTIFY profileUnitChanged)
+    Q_PROPERTY(QString profilePage READ profilePage WRITE setProfilePage NOTIFY profilePageChanged)
+    Q_PROPERTY(QString speedSource READ speedSource WRITE setSpeedSource NOTIFY speedSourceChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(qlonglong lastUpdateMs READ lastUpdateMs NOTIFY lastUpdateMsChanged)
 
 public:
     explicit VehicleState(QObject* parent = nullptr);
+    ~VehicleState();
 
     double speed() const;
     double odometer() const;
@@ -29,6 +32,8 @@ public:
     int pollMs() const;
     int profileMaxSpeed() const;
     QString profileUnit() const;
+    QString profilePage() const;
+    QString speedSource() const;
     bool connected() const;
     QString lastError() const;
     qlonglong lastUpdateMs() const;
@@ -41,8 +46,11 @@ public:
     void setPollMs(int value);
     void setProfileMaxSpeed(int value);
     void setProfileUnit(const QString& value);
+    void setProfilePage(const QString& value);
+    void setSpeedSource(const QString& value);
 
     Q_INVOKABLE void loadStateNow();
+    Q_INVOKABLE void resetTrip();
 
 signals:
     void speedChanged();
@@ -53,6 +61,8 @@ signals:
     void pollMsChanged();
     void profileMaxSpeedChanged();
     void profileUnitChanged();
+    void profilePageChanged();
+    void speedSourceChanged();
     void connectedChanged();
     void lastErrorChanged();
     void lastUpdateMsChanged();
@@ -60,6 +70,8 @@ signals:
 private:
     void updatePolling();
     void applyJson(const QJsonObject& obj);
+    void integrateDistanceNow();
+    void saveDistanceNow();
     void setConnected(bool value);
     void setLastError(const QString& value);
     void setLastUpdateMs(qlonglong value);
@@ -69,11 +81,17 @@ private:
     double m_trip = 0.0;
     QString m_source = "demo";
     QString m_stateFile = "../state.json";
-    int m_pollMs = 120;
+    int m_pollMs = 16;   // ~60 Hz — match display frame rate for smooth needle
     int m_profileMaxSpeed = 260;
     QString m_profileUnit = "km/h";
+    QString m_profilePage = "classic";
+    QString m_speedSource = "OBD";
     bool m_connected = false;
     QString m_lastError;
     qlonglong m_lastUpdateMs = 0;
+    qlonglong m_lastIntegrateMs = 0;
+    bool m_externalDistanceAuthoritative = false;
     QTimer m_pollTimer;
+    QTimer m_integrateTimer;
+    QTimer m_saveTimer;
 };

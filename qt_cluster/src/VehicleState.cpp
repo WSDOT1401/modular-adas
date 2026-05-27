@@ -22,12 +22,27 @@ QString normalizeProfileUnit(const QString& value) {
 }
 }
 
+VehicleState::~VehicleState() {
+    saveDistanceNow();
+}
+
 VehicleState::VehicleState(QObject* parent) : QObject(parent) {
     QSettings settings;
     setProfileMaxSpeed(settings.value(QStringLiteral("gauge/profileMaxSpeed"), m_profileMaxSpeed).toInt());
     setProfileUnit(settings.value(QStringLiteral("gauge/profileUnit"), m_profileUnit).toString());
+    m_profilePage   = settings.value(QStringLiteral("ui/profilePage"),   m_profilePage).toString();
+    m_speedSource   = settings.value(QStringLiteral("data/speedSource"), m_speedSource).toString();
+    m_odometer = settings.value(QStringLiteral("distance/odometer"), m_odometer).toDouble();
+    m_trip     = settings.value(QStringLiteral("distance/trip"),     m_trip).toDouble();
 
-    connect(&m_pollTimer, &QTimer::timeout, this, &VehicleState::loadStateNow);
+    connect(&m_pollTimer,      &QTimer::timeout, this, &VehicleState::loadStateNow);
+    connect(&m_integrateTimer, &QTimer::timeout, this, &VehicleState::integrateDistanceNow);
+    connect(&m_saveTimer,      &QTimer::timeout, this, &VehicleState::saveDistanceNow);
+    m_integrateTimer.setInterval(50);
+    m_lastIntegrateMs = QDateTime::currentMSecsSinceEpoch();
+    m_integrateTimer.start();
+    m_saveTimer.setInterval(30000);  // persist odo/trip every 30 s
+    m_saveTimer.start();
     updatePolling();
 }
 
@@ -39,6 +54,8 @@ QString VehicleState::stateFile() const { return m_stateFile; }
 int VehicleState::pollMs() const { return m_pollMs; }
 int VehicleState::profileMaxSpeed() const { return m_profileMaxSpeed; }
 QString VehicleState::profileUnit() const { return m_profileUnit; }
+QString VehicleState::profilePage() const { return m_profilePage; }
+QString VehicleState::speedSource() const { return m_speedSource; }
 bool VehicleState::connected() const { return m_connected; }
 QString VehicleState::lastError() const { return m_lastError; }
 qlonglong VehicleState::lastUpdateMs() const { return m_lastUpdateMs; }
@@ -65,6 +82,8 @@ void VehicleState::setSource(const QString& value) {
     if (m_source == value) return;
     m_source = value;
     emit sourceChanged();
+    m_externalDistanceAuthoritative = false;
+    m_lastIntegrateMs = QDateTime::currentMSecsSinceEpoch();
     updatePolling();
 }
 
@@ -100,6 +119,26 @@ void VehicleState::setProfileUnit(const QString& value) {
 
     QSettings settings;
     settings.setValue(QStringLiteral("gauge/profileUnit"), m_profileUnit);
+}
+
+void VehicleState::setProfilePage(const QString& value) {
+    const QString normalized = (value == "music" || value == "map") ? value : "classic";
+    if (m_profilePage == normalized) return;
+    m_profilePage = normalized;
+    emit profilePageChanged();
+
+    QSettings settings;
+    settings.setValue(QStringLiteral("ui/profilePage"), m_profilePage);
+}
+
+void VehicleState::setSpeedSource(const QString& value) {
+    const QString normalized = (value == "GPS") ? QStringLiteral("GPS") : QStringLiteral("OBD");
+    if (m_speedSource == normalized) return;
+    m_speedSource = normalized;
+    emit speedSourceChanged();
+
+    QSettings settings;
+    settings.setValue(QStringLiteral("data/speedSource"), m_speedSource);
 }
 
 void VehicleState::updatePolling() {
@@ -138,15 +177,56 @@ void VehicleState::loadStateNow() {
 }
 
 void VehicleState::applyJson(const QJsonObject& obj) {
+    const bool hasOdo = obj.contains("odo") && obj["odo"].isDouble();
+    const bool hasTrip = obj.contains("trip") && obj["trip"].isDouble();
+    m_externalDistanceAuthoritative = hasOdo && hasTrip;
+
     if (obj.contains("speed") && obj["speed"].isDouble()) {
-        setSpeed(obj["speed"].toDouble());
+        const double raw = obj["speed"].toDouble();
+        // Adaptive low-pass filter: heavy smoothing for small integer jitter
+        // (±1–3 km/h from OBD), fast tracking for real acceleration/braking.
+        // alpha scales from 0.25 (diff=0) to 1.0 (diff≥12.5 km/h).
+        const double diff = raw - m_speed;
+        const double absDiff = diff < 0 ? -diff : diff;
+        double alpha = 0.25 + absDiff * 0.06;
+        if (alpha > 1.0) alpha = 1.0;
+        setSpeed(m_speed + alpha * diff);
     }
-    if (obj.contains("odo") && obj["odo"].isDouble()) {
+    if (hasOdo) {
         setOdometer(obj["odo"].toDouble());
     }
-    if (obj.contains("trip") && obj["trip"].isDouble()) {
+    if (hasTrip) {
         setTrip(obj["trip"].toDouble());
     }
+}
+
+void VehicleState::integrateDistanceNow() {
+    const qlonglong now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastIntegrateMs <= 0) {
+        m_lastIntegrateMs = now;
+        return;
+    }
+
+    const qlonglong dtMs = now - m_lastIntegrateMs;
+    m_lastIntegrateMs = now;
+    if (dtMs <= 0) return;
+
+    // If external state provides both odo + trip, trust those values.
+    if (m_source == "state" && m_externalDistanceAuthoritative) return;
+
+    double speedKmh = qMax(0.0, m_speed);
+    if (m_profileUnit == QStringLiteral("mph")) {
+        speedKmh *= 1.609344;
+    }
+
+    const double deltaKm = speedKmh * (static_cast<double>(dtMs) / 3600000.0);
+    if (deltaKm <= 0.0) return;
+
+    setOdometer(m_odometer + deltaKm);
+
+    double newTrip = m_trip + deltaKm;
+    while (newTrip >= 1000.0) newTrip -= 1000.0;
+    setTrip(newTrip);
 }
 
 void VehicleState::setConnected(bool value) {
@@ -165,4 +245,15 @@ void VehicleState::setLastUpdateMs(qlonglong value) {
     if (m_lastUpdateMs == value) return;
     m_lastUpdateMs = value;
     emit lastUpdateMsChanged();
+}
+
+void VehicleState::saveDistanceNow() {
+    QSettings settings;
+    settings.setValue(QStringLiteral("distance/odometer"), m_odometer);
+    settings.setValue(QStringLiteral("distance/trip"),     m_trip);
+}
+
+void VehicleState::resetTrip() {
+    setTrip(0.0);
+    saveDistanceNow();
 }
