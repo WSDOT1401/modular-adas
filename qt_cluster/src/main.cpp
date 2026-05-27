@@ -22,11 +22,11 @@ static QString loadBundledFontFamily() {
     const QString cwd = QDir::currentPath();
 
     const QStringList baseDirs = {
-        appDir + "/fonts",
-        appDir + "/../fonts",
-        cwd + "/fonts",
-        cwd + "/../fonts",
-        cwd + "/qt_cluster/fonts"
+        appDir + "/asset/fonts",
+        appDir + "/../asset/fonts",
+        cwd + "/asset/fonts",
+        cwd + "/../asset/fonts",
+        cwd + "/qt_cluster/asset/fonts"
     };
 
     const QStringList candidates = {
