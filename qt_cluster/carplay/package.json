@@ -1,0 +1,13 @@
+{
+  "name": "w124-carplay-server",
+  "version": "1.0.0",
+  "description": "CarPlay sidecar server for W124 cluster",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "node-carplay": "^2.0.0"
+  }
+}
