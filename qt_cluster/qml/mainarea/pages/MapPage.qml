@@ -87,7 +87,7 @@ Item {
 
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: root.carplayStatus === "connecting" ? "CONNECTING…"
+                    text: root.carplayStatus === "connecting" ? "CONNECTING\u2026"
                         : root.carplayStatus === "error"      ? "CARPLAY ERROR"
                         :                                        "AWAITING CARPLAY"
                     font.family: root.fontFamily
@@ -119,7 +119,7 @@ Item {
     QtObject {
         id: touchBridge
         function sendTouch(action, nx, ny) {
-            // On Pi: carplay server listens on TCP :9002 for {"action":…,"x":…,"y":…}
+            // On Pi: carplay server listens on TCP :9002 for {"action":"…","x":…,"y":…}
         }
     }
 
