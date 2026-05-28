@@ -58,3 +58,4 @@ list.txt
 # --- Python cache (pi helpers) ---
 __pycache__/
 *.py[cod]
+qt_cluster/state.json
