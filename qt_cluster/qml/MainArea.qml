@@ -117,7 +117,8 @@ Item {
     // ── Persistent bottom labels (classic + music only) ───────────────
     Text {
         z: 5
-        visible: root.mode !== "map"
+        opacity: root.mode === "map" ? 0.0 : 1.0
+        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
         text: root.unitText
         color: "#efede8"
         font.family: root.fontFamily
@@ -129,7 +130,8 @@ Item {
     }
     Row {
         z: 5
-        visible: root.mode !== "map"
+        opacity: root.mode === "map" ? 0.0 : 1.0
+        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
         spacing: 3 * root._s
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
@@ -153,7 +155,8 @@ Item {
     }
     Text {
         z: 5
-        visible: root.mode !== "map"
+        opacity: root.mode === "map" ? 0.0 : 1.0
+        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
         text: "VDO"
         color: "#dfddd8"
         font.family: root.fontFamily
