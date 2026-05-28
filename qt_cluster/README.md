@@ -92,12 +92,53 @@ DSI is preferred over HDMI for car use — fewer connectors to vibrate loose.
 
 ### Speed sources
 
+The W124 predates OBD-II. Speed comes from the gearbox VSS sender or GPS.
+
 | Source | Hardware | Interface |
 |---|---|---|
-| **OBD** (`speedSource: "OBD"`) | ELM327 USB adapter (e.g. OBDLink SX) | USB → `/dev/ttyUSB0` |
-| **GPS** (`speedSource: "GPS"`) | USB GPS dongle (u-blox 7/8, e.g. GlobalSat BU-353) | USB → `/dev/ttyUSB1` or `/dev/ttyACM0` |
+| **VSS** (recommended) | Optocoupler circuit tapped to gearbox sender wire | Pi GPIO pin (BCM17 default) |
+| **GPS** | USB GPS dongle (u-blox 7/8, e.g. GlobalSat BU-353) | USB → `/dev/ttyACM0` |
 
-Avoid Bluetooth ELM327 — pairing reliability in a car is poor.
+### VSS wiring circuit
+
+The W124 gearbox sender outputs a 12V square wave (reed switch or Hall effect).
+This must be stepped down to 3.3V before connecting to Pi GPIO.
+
+```
+Gearbox sender wire (12V pulses)
+        │
+       [1kΩ]
+        │
+        ├──── PC817 optocoupler pin 1 (anode)
+        │
+       [GND]  ← car chassis ground
+
+PC817 pin 2 (cathode) → car GND
+PC817 pin 4 (collector) → [10kΩ pull-up] → Pi 3.3V
+PC817 pin 3 (emitter)  → Pi GND
+PC817 pin 4 (collector) → Pi GPIO BCM17
+```
+
+Result: idle = HIGH (3.3V), each speed pulse = LOW — safe for Pi GPIO.
+
+**Calibration:** edit `PULSES_PER_KM` in `pi/vss_reader.py`.
+Default is 8000 (W124 typical). Drive a measured 1 km, count pulses logged,
+adjust the constant to match.
+
+### Running the VSS reader
+
+The `start_qt_kiosk.sh` script launches `vss_reader.py` automatically.
+To disable during bench testing:
+
+```bash
+VSS_DISABLE=1 ./pi/start_qt_kiosk.sh
+```
+
+For bench testing with simulated speed, run `mock_state_writer.py` separately:
+
+```bash
+python3 pi/mock_state_writer.py
+```
 
 ### Power
 
