@@ -19,6 +19,7 @@ class VehicleState : public QObject {
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(qlonglong lastUpdateMs READ lastUpdateMs NOTIFY lastUpdateMsChanged)
+    Q_PROPERTY(QString carplayStatus READ carplayStatus NOTIFY carplayStatusChanged)
 
 public:
     explicit VehicleState(QObject* parent = nullptr);
@@ -37,6 +38,7 @@ public:
     bool connected() const;
     QString lastError() const;
     qlonglong lastUpdateMs() const;
+    QString carplayStatus() const;
 
     void setSpeed(double value);
     void setOdometer(double value);
@@ -66,6 +68,7 @@ signals:
     void connectedChanged();
     void lastErrorChanged();
     void lastUpdateMsChanged();
+    void carplayStatusChanged();
 
 private:
     void updatePolling();
@@ -75,6 +78,8 @@ private:
     void setConnected(bool value);
     void setLastError(const QString& value);
     void setLastUpdateMs(qlonglong value);
+    void setCarplayStatus(const QString& value);
+    void loadCarplayStatusNow();
 
     double m_speed = 23.0;
     double m_odometer = 87266.0;
@@ -91,6 +96,7 @@ private:
     qlonglong m_lastUpdateMs = 0;
     qlonglong m_lastIntegrateMs = 0;
     bool m_externalDistanceAuthoritative = false;
+    QString m_carplayStatus = QStringLiteral("waiting");
     QTimer m_pollTimer;
     QTimer m_integrateTimer;
     QTimer m_saveTimer;

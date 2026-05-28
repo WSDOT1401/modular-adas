@@ -5,6 +5,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Quick LabsSettings)
+<<<<<<< Updated upstream
+=======
+
+# Qt6::Multimedia is required on Pi (GStreamer backend for CarPlay VideoOutput).
+# It is optional on Windows dev machines where CarPlay is never active.
+find_package(Qt6 OPTIONAL_COMPONENTS Multimedia)
+>>>>>>> Stashed changes
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -28,6 +35,7 @@ qt_add_qml_module(w124_cluster
         qml/mainarea/pages/ClassicPage.qml
         qml/mainarea/pages/MusicPage.qml
         qml/mainarea/pages/MapPage.qml
+        qml/mainarea/pages/CarPlayVideo.qml
         qml/mainarea/classic/OdometerDisplay.qml
         qml/mainarea/classic/TripDisplay.qml
         qml/mainarea/classic/HundredMeterCounter.qml
@@ -44,6 +52,13 @@ target_sources(w124_cluster PRIVATE
 )
 
 target_link_libraries(w124_cluster PRIVATE Qt6::Quick Qt6::LabsSettings)
+<<<<<<< Updated upstream
+=======
+if(Qt6Multimedia_FOUND)
+    target_link_libraries(w124_cluster PRIVATE Qt6::Multimedia)
+    target_compile_definitions(w124_cluster PRIVATE HAVE_QT_MULTIMEDIA)
+endif()
+>>>>>>> Stashed changes
 
 install(TARGETS w124_cluster
     RUNTIME DESTINATION bin

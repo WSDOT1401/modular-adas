@@ -1,7 +1,9 @@
 #include "VehicleState.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSettings>
@@ -45,6 +47,8 @@ VehicleState::VehicleState(QObject* parent) : QObject(parent) {
     m_saveTimer.start();
     updatePolling();
 }
+
+QString VehicleState::carplayStatus() const { return m_carplayStatus; }
 
 double VehicleState::speed() const { return m_speed; }
 double VehicleState::odometer() const { return m_odometer; }
@@ -155,6 +159,10 @@ void VehicleState::updatePolling() {
 void VehicleState::loadStateNow() {
     if (m_source != "state") return;
 
+    // Poll carplay status alongside the vehicle state file (same thread slot,
+    // no extra timer — avoids file I/O interrupting animations)
+    loadCarplayStatusNow();
+
     QFile file(m_stateFile);
     if (!file.open(QIODevice::ReadOnly)) {
         setConnected(false);
@@ -247,6 +255,27 @@ void VehicleState::setLastUpdateMs(qlonglong value) {
     emit lastUpdateMsChanged();
 }
 
+void VehicleState::setCarplayStatus(const QString& value) {
+    if (m_carplayStatus == value) return;
+    m_carplayStatus = value;
+    emit carplayStatusChanged();
+}
+
+void VehicleState::loadCarplayStatusNow() {
+    const QString statusPath = QFileInfo(m_stateFile).dir().filePath(
+        QStringLiteral("carplay_status.json"));
+    QFile file(statusPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        setCarplayStatus(QStringLiteral("waiting"));
+        return;
+    }
+    QJsonParseError err;
+    const auto doc = QJsonDocument::fromJson(file.readAll(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) return;
+    const QString status = doc.object().value(QStringLiteral("status")).toString();
+    if (!status.isEmpty()) setCarplayStatus(status);
+}
+
 void VehicleState::saveDistanceNow() {
     QSettings settings;
     settings.setValue(QStringLiteral("distance/odometer"), m_odometer);
@@ -254,6 +283,14 @@ void VehicleState::saveDistanceNow() {
 }
 
 void VehicleState::resetTrip() {
-    setTrip(0.0);
-    saveDistanceNow();
+    if (m_source == QLatin1String("state") && m_externalDistanceAuthoritative) {
+        // Signal the VSS reader process to reset its trip counter
+        const QString flagPath = QFileInfo(m_stateFile).dir().filePath(
+            QStringLiteral("trip_reset.flag"));
+        QFile f(flagPath);
+        f.open(QIODevice::WriteOnly);
+    } else {
+        setTrip(0.0);
+        saveDistanceNow();
+    }
 }
