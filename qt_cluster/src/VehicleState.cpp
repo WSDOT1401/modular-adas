@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSettings>
@@ -40,6 +41,7 @@ VehicleState::VehicleState(QObject* parent) : QObject(parent) {
     connect(&m_pollTimer,      &QTimer::timeout, this, &VehicleState::loadStateNow);
     connect(&m_integrateTimer, &QTimer::timeout, this, &VehicleState::integrateDistanceNow);
     connect(&m_saveTimer,      &QTimer::timeout, this, &VehicleState::saveDistanceNow);
+    connect(&m_carplayPollTimer, &QTimer::timeout, this, &VehicleState::loadCarplayStatusNow);
     m_integrateTimer.setInterval(50);
     m_lastIntegrateMs = QDateTime::currentMSecsSinceEpoch();
     m_integrateTimer.start();
@@ -145,12 +147,35 @@ void VehicleState::setSpeedSource(const QString& value) {
     settings.setValue(QStringLiteral("data/speedSource"), m_speedSource);
 }
 
+void VehicleState::setUdpPort(int port) {
+    const int clamped = qBound(1024, port, 65535);
+    if (m_udpPort == clamped) return;
+    m_udpPort = clamped;
+    if (m_source == QLatin1String("udp")) updatePolling();
+}
+
 void VehicleState::updatePolling() {
+    m_pollTimer.stop();
+    m_carplayPollTimer.stop();
+    m_udpSocket.close();
+
     if (m_source == "state") {
         m_pollTimer.start(m_pollMs);
         loadStateNow();
+        // carplay status is polled inside loadStateNow() on the same timer
+    } else if (m_source == "udp") {
+        if (m_udpSocket.bind(QHostAddress::LocalHost, static_cast<quint16>(m_udpPort))) {
+            connect(&m_udpSocket, &QUdpSocket::readyRead,
+                    this, &VehicleState::onUdpDataReady, Qt::UniqueConnection);
+            setConnected(false);  // becomes true on first datagram
+            setLastError(QString());
+        } else {
+            setConnected(false);
+            setLastError(QStringLiteral("Cannot bind UDP port %1").arg(m_udpPort));
+        }
+        if (!m_stateFile.isEmpty())
+            m_carplayPollTimer.start(2000);
     } else {
-        m_pollTimer.stop();
         setConnected(false);
         setLastError(QString());
     }
@@ -276,6 +301,23 @@ void VehicleState::loadCarplayStatusNow() {
     if (!status.isEmpty()) setCarplayStatus(status);
 }
 
+void VehicleState::onUdpDataReady() {
+    while (m_udpSocket.hasPendingDatagrams()) {
+        QByteArray data;
+        data.resize(static_cast<int>(m_udpSocket.pendingDatagramSize()));
+        m_udpSocket.readDatagram(data.data(), data.size());
+
+        QJsonParseError err;
+        const auto doc = QJsonDocument::fromJson(data, &err);
+        if (err.error != QJsonParseError::NoError || !doc.isObject()) continue;
+
+        applyJson(doc.object());
+        setConnected(true);
+        setLastError(QString());
+        setLastUpdateMs(QDateTime::currentMSecsSinceEpoch());
+    }
+}
+
 void VehicleState::saveDistanceNow() {
     QSettings settings;
     settings.setValue(QStringLiteral("distance/odometer"), m_odometer);
@@ -283,8 +325,8 @@ void VehicleState::saveDistanceNow() {
 }
 
 void VehicleState::resetTrip() {
-    if (m_source == QLatin1String("state") && m_externalDistanceAuthoritative) {
-        // Signal the VSS reader process to reset its trip counter
+    if (m_externalDistanceAuthoritative && !m_stateFile.isEmpty()) {
+        // Signal the VSS reader process (state or udp mode) to reset its trip counter
         const QString flagPath = QFileInfo(m_stateFile).dir().filePath(
             QStringLiteral("trip_reset.flag"));
         QFile f(flagPath);

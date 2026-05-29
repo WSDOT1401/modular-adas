@@ -72,6 +72,10 @@ int main(int argc, char* argv[]) {
     for (const QString& arg : args) {
         if (arg == "--state") {
             vehicleState.setSource("state");
+        } else if (arg == "--udp") {
+            vehicleState.setSource("udp");
+        } else if (arg.startsWith("--udp-port=")) {
+            vehicleState.setUdpPort(arg.mid(QString("--udp-port=").size()).toInt());
         } else if (arg.startsWith("--state-file=")) {
             vehicleState.setStateFile(arg.mid(QString("--state-file=").size()));
         } else if (arg.startsWith("--poll-ms=")) {

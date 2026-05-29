@@ -11,9 +11,18 @@ import json
 import math
 import pathlib
 import random
+import socket
+import sys
 import time
 
 STATE = pathlib.Path(__file__).resolve().parent.parent / "state.json"
+
+# UDP mode: pass --udp [--udp-port=N] to send datagrams instead of writing a file
+_UDP_PORT = 9100
+for _a in sys.argv[1:]:
+    if _a.startswith("--udp-port="):
+        _UDP_PORT = int(_a.split("=", 1)[1])
+_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if "--udp" in sys.argv else None
 
 DT       = 0.05   # 50 ms physics ticks
 JERK_MAX = 3.0    # km/h/s²  — how fast accel itself may change
@@ -93,15 +102,18 @@ while True:
 
     payload = {"speed": round(v, 1)}
 
-    tmp = STATE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-    try:
-        tmp.replace(STATE)
-    except PermissionError:
+    if _udp_sock:
+        _udp_sock.sendto(json.dumps(payload).encode(), ("127.0.0.1", _UDP_PORT))
+    else:
+        tmp = STATE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
         try:
-            STATE.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            tmp.replace(STATE)
         except PermissionError:
-            pass
+            try:
+                STATE.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            except PermissionError:
+                pass
     time.sleep(DT)
 
 

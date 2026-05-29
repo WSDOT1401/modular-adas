@@ -4,7 +4,7 @@ project(w124_cluster_qt LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick LabsSettings)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick LabsSettings Network)
 
 # Qt6::Multimedia is required on Pi (GStreamer backend for CarPlay VideoOutput).
 # It is optional on Windows dev machines where CarPlay is never active.
@@ -48,7 +48,7 @@ target_sources(w124_cluster PRIVATE
     src/VehicleState.h
 )
 
-target_link_libraries(w124_cluster PRIVATE Qt6::Quick Qt6::LabsSettings)
+target_link_libraries(w124_cluster PRIVATE Qt6::Quick Qt6::LabsSettings Qt6::Network)
 if(Qt6Multimedia_FOUND)
     target_link_libraries(w124_cluster PRIVATE Qt6::Multimedia)
     target_compile_definitions(w124_cluster PRIVATE HAVE_QT_MULTIMEDIA)

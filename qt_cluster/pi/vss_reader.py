@@ -21,6 +21,7 @@ Trip resets when state.json contains "trip_reset": true  (written by Qt app).
 import json
 import pathlib
 import signal
+import socket
 import threading
 import time
 from collections import deque
@@ -40,6 +41,10 @@ ROOT       = pathlib.Path(__file__).resolve().parent.parent
 STATE_FILE = ROOT / "state.json"
 ODO_FILE   = ROOT / "data" / "odometer.json"
 FLAG_FILE  = ROOT / "trip_reset.flag"   # Qt touches this to request a trip reset
+UDP_HOST   = "127.0.0.1"
+UDP_PORT   = 9100
+
+_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 # ── Derived constants ──────────────────────────────────────────────────────
 METERS_PER_PULSE = 1000.0 / PULSES_PER_KM   # metres travelled per pulse
@@ -137,11 +142,10 @@ while True:
         odo  = round(total_odo, 1)
         trip = round(trip_odo, 3)
 
-    STATE_FILE.write_text(json.dumps({
-        "speed": speed,
-        "odo":   odo,
-        "trip":  trip,
-    }))
+    _sock.sendto(
+        json.dumps({"speed": speed, "odo": odo, "trip": trip}).encode(),
+        (UDP_HOST, UDP_PORT)
+    )
 
     save_counter += 1
     if save_counter >= ODO_SAVE_EVERY:

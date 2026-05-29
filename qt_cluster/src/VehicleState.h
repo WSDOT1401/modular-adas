@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QTimer>
+#include <QUdpSocket>
 
 class VehicleState : public QObject {
     Q_OBJECT
@@ -50,6 +51,7 @@ public:
     void setProfileUnit(const QString& value);
     void setProfilePage(const QString& value);
     void setSpeedSource(const QString& value);
+    void setUdpPort(int port);
 
     Q_INVOKABLE void loadStateNow();
     Q_INVOKABLE void resetTrip();
@@ -80,6 +82,7 @@ private:
     void setLastUpdateMs(qlonglong value);
     void setCarplayStatus(const QString& value);
     void loadCarplayStatusNow();
+    void onUdpDataReady();
 
     double m_speed = 23.0;
     double m_odometer = 87266.0;
@@ -97,7 +100,10 @@ private:
     qlonglong m_lastIntegrateMs = 0;
     bool m_externalDistanceAuthoritative = false;
     QString m_carplayStatus = QStringLiteral("waiting");
+    int m_udpPort = 9100;
     QTimer m_pollTimer;
     QTimer m_integrateTimer;
     QTimer m_saveTimer;
+    QTimer m_carplayPollTimer;
+    QUdpSocket m_udpSocket;
 };
