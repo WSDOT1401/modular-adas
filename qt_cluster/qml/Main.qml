@@ -107,6 +107,9 @@ Window {
         profileMaxSpeed: vehicleState.profileMaxSpeed
         profileUnit: vehicleState.profileUnit
         settingsOpen: root.settingsVisible
+        oilTemp: vehicleState.oilTemp
+        outsideTemp: vehicleState.outsideTemp
+        voltage:     vehicleState.voltage
 
         Component.onCompleted: gauge.mainAreaMode = vehicleState.profilePage
         onMainAreaModeChanged: vehicleState.profilePage = gauge.mainAreaMode

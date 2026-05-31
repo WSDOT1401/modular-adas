@@ -21,6 +21,9 @@ class VehicleState : public QObject {
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(qlonglong lastUpdateMs READ lastUpdateMs NOTIFY lastUpdateMsChanged)
     Q_PROPERTY(QString carplayStatus READ carplayStatus NOTIFY carplayStatusChanged)
+    Q_PROPERTY(double oilTemp READ oilTemp NOTIFY oilTempChanged)
+    Q_PROPERTY(double outsideTemp READ outsideTemp NOTIFY outsideTempChanged)
+    Q_PROPERTY(double voltage READ voltage NOTIFY voltageChanged)
 
 public:
     explicit VehicleState(QObject* parent = nullptr);
@@ -40,6 +43,9 @@ public:
     QString lastError() const;
     qlonglong lastUpdateMs() const;
     QString carplayStatus() const;
+    double oilTemp() const;
+    double outsideTemp() const;
+    double voltage() const;
 
     void setSpeed(double value);
     void setOdometer(double value);
@@ -71,6 +77,9 @@ signals:
     void lastErrorChanged();
     void lastUpdateMsChanged();
     void carplayStatusChanged();
+    void oilTempChanged();
+    void outsideTempChanged();
+    void voltageChanged();
 
 private:
     void updatePolling();
@@ -81,6 +90,9 @@ private:
     void setLastError(const QString& value);
     void setLastUpdateMs(qlonglong value);
     void setCarplayStatus(const QString& value);
+    void setOilTemp(double value);
+    void setOutsideTemp(double value);
+    void setVoltage(double value);
     void loadCarplayStatusNow();
     void onUdpDataReady();
 
@@ -100,6 +112,9 @@ private:
     qlonglong m_lastIntegrateMs = 0;
     bool m_externalDistanceAuthoritative = false;
     QString m_carplayStatus = QStringLiteral("waiting");
+    double m_oilTemp = -1.0;
+    double m_outsideTemp = -999.0;
+    double m_voltage = 0.0;
     int m_udpPort = 9100;
     QTimer m_pollTimer;
     QTimer m_integrateTimer;

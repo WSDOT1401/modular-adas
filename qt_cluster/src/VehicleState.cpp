@@ -231,6 +231,12 @@ void VehicleState::applyJson(const QJsonObject& obj) {
     if (hasTrip) {
         setTrip(obj["trip"].toDouble());
     }
+    if (obj.contains("oil_temp") && obj["oil_temp"].isDouble())
+        setOilTemp(obj["oil_temp"].toDouble());
+    if (obj.contains("outside_temp") && obj["outside_temp"].isDouble())
+        setOutsideTemp(obj["outside_temp"].toDouble());
+    if (obj.contains("voltage") && obj["voltage"].isDouble())
+        setVoltage(obj["voltage"].toDouble());
 }
 
 void VehicleState::integrateDistanceNow() {
@@ -278,6 +284,26 @@ void VehicleState::setLastUpdateMs(qlonglong value) {
     if (m_lastUpdateMs == value) return;
     m_lastUpdateMs = value;
     emit lastUpdateMsChanged();
+}
+
+double VehicleState::oilTemp() const { return m_oilTemp; }
+double VehicleState::outsideTemp() const { return m_outsideTemp; }
+double VehicleState::voltage()     const { return m_voltage; }
+
+void VehicleState::setOilTemp(double value) {
+    if (qFuzzyCompare(m_oilTemp, value)) return;
+    m_oilTemp = value;
+    emit oilTempChanged();
+}
+void VehicleState::setOutsideTemp(double value) {
+    if (qFuzzyCompare(m_outsideTemp, value)) return;
+    m_outsideTemp = value;
+    emit outsideTempChanged();
+}
+void VehicleState::setVoltage(double value) {
+    if (qFuzzyCompare(m_voltage, value)) return;
+    m_voltage = value;
+    emit voltageChanged();
 }
 
 void VehicleState::setCarplayStatus(const QString& value) {

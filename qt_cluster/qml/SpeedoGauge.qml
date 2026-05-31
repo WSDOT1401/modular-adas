@@ -18,8 +18,11 @@ Item {
     readonly property real startDeg: 140
     readonly property real sweepDeg: 260
 
-    // classic | music | map  (or aliases: cluster/status→classic, bluetooth→music, carplay→map)
+    // classic | data | map  (or aliases: cluster/status→classic, bluetooth→data, carplay→map)
     property string mainAreaMode: "classic"
+    property real   oilTemp:       -1.0
+    property real   outsideTemp: -999.0
+    property real   voltage:        0.0
     property bool settingsOpen: false
     property string statusText: ""
     property string warningText: ""
@@ -81,7 +84,7 @@ Item {
         maxSpeed: root.maxSpeed
         startDeg: root.startDeg
         sweepDeg: root.sweepDeg
-        outlineStyle: root.mainAreaMode === "music"
+        outlineStyle: root.mainAreaMode === "data"
         opacity: root.settingsOpen || root.mainAreaMode === "map" ? 0.0 : 1.0
         Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutCubic } }
     }
@@ -96,6 +99,9 @@ Item {
         unitText: root.profileUnit
         fontFamily: root.fontFamily
         mode: root.mainAreaMode
+        oilTemp: root.oilTemp
+        outsideTemp: root.outsideTemp
+        voltage:     root.voltage
         statusText: root.statusText
         warningText: root.warningText
         warningActive: root.warningActive

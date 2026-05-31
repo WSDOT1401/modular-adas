@@ -11,7 +11,10 @@ Item {
     property real trip: 0
     property string unitText: "km/h"
     property string fontFamily: "Sans Serif"
-    property string mode: "classic"  // classic | music | map  (aliases: cluster/status→classic, bluetooth→music, carplay→map)
+    property string mode: "classic"  // classic | data | map  (aliases: cluster/status→classic, bluetooth→data, carplay→map)
+    property real   oilTemp:       -1.0
+    property real   outsideTemp: -999.0
+    property real   voltage:        0.0
     property string statusText: ""
     property string warningText: ""
     property bool warningActive: false
@@ -69,9 +72,9 @@ Item {
         }
     }
 
-    // ── Page 1: Music ─────────────────────────────────────────────────
+    // ── Page 1: Data ──────────────────────────────────────────────────
     Item {
-        id: musicPage
+        id: dataPage
         readonly property int pageIndex: 1
         anchors.top: parent.top
         anchors.bottom: parent.bottom
@@ -81,13 +84,15 @@ Item {
             enabled: carousel.animationsEnabled && !carousel.wrapInProgress
             NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
         }
-        opacity: carousel.mode === "music" ? 1.0 : 0.0
+        opacity: carousel.mode === "data" ? 1.0 : 0.0
         Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
-        Pages.MusicPage {
+        Pages.DataPage {
             anchors.fill: parent
-            connected: root.connected
-            fontFamily: root.fontFamily
+            oilTemp: root.oilTemp
+            outsideTemp: root.outsideTemp
+            voltage:     root.voltage
+            fontFamily:  root.fontFamily
         }
     }
 
@@ -114,7 +119,7 @@ Item {
         }
     }
 
-    // ── Persistent bottom labels (classic + music only) ───────────────
+    // ── Persistent bottom labels (classic + data only) ────────────────
     Text {
         z: 5
         opacity: root.mode === "map" ? 0.0 : 1.0

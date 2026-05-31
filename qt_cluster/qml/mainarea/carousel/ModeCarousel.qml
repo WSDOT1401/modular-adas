@@ -6,7 +6,7 @@ Item {
     property string mode: "classic"
     property real pageWidth: 0
 
-    readonly property var availableModes: ["classic", "music", "map"]
+    readonly property var availableModes: ["classic", "data", "map"]
     property int currentModeIndex: 0
     property bool animationsEnabled: false
     property real wrapShift: 0
@@ -18,7 +18,7 @@ Item {
     signal resolvedMode(string mode)
 
     function resolveModeName(m) {
-        const aliases = { "cluster": "classic", "status": "classic", "bluetooth": "music", "carplay": "map" }
+        const aliases = { "cluster": "classic", "status": "classic", "bluetooth": "data", "music": "data", "carplay": "map" }
         return aliases[m] !== undefined ? aliases[m] : m
     }
 

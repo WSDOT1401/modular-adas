@@ -31,6 +31,7 @@ qt_add_qml_module(w124_cluster
         qml/MainArea.qml
         qml/mainarea/pages/ClassicPage.qml
         qml/mainarea/pages/MusicPage.qml
+        qml/mainarea/pages/DataPage.qml
         qml/mainarea/pages/MapPage.qml
         qml/mainarea/pages/CarPlayVideo.qml
         qml/mainarea/classic/OdometerDisplay.qml
