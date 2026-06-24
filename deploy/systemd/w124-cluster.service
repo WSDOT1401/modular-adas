@@ -6,8 +6,8 @@ After=graphical.target
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/Zeiger/qt_cluster
-ExecStart=/home/pi/Zeiger/qt_cluster/pi/start_qt_kiosk.sh
+WorkingDirectory=/home/pi/Zeiger/w124-dash
+ExecStart=/home/pi/Zeiger/w124-dash/deploy/start_kiosk.sh
 Restart=always
 RestartSec=2
 Environment=QT_QPA_PLATFORM=wayland
