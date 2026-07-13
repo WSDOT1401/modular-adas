@@ -28,9 +28,13 @@ import { spawn } from 'child_process'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// carplay_status.json sits next to state.json in the qt_cluster root
+// carplay_status.json must land in the cluster's runtime dir (the dir of the
+// cluster's --state-file). The launcher exports W124_RUNTIME_DIR; fall back to
+// the legacy qt_cluster/ location for standalone runs.
+const RUNTIME_DIR = process.env.W124_RUNTIME_DIR ||
+    path.join(__dirname, '..', '..', 'qt_cluster')
 const STATUS_FILE = process.env.CARPLAY_STATUS_FILE ||
-    path.join(__dirname, '..', 'carplay_status.json')
+    path.join(RUNTIME_DIR, 'carplay_status.json')
 
 // ── Config ────────────────────────────────────────────────────────────────
 const VIDEO_PORT  = 9001   // Qt reads H264 stream from here

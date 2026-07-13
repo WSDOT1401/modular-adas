@@ -19,6 +19,7 @@ Trip resets when state.json contains "trip_reset": true  (written by Qt app).
 """
 
 import json
+import os
 import pathlib
 import signal
 import socket
@@ -37,10 +38,14 @@ WRITE_INTERVAL  = 0.12      # state.json write interval (seconds)
 ODO_SAVE_EVERY  = 50        # Persist odometer every N write cycles (~6 s)
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-ROOT       = pathlib.Path(__file__).resolve().parent.parent
-STATE_FILE = ROOT / "state.json"
-ODO_FILE   = ROOT / "data" / "odometer.json"
-FLAG_FILE  = ROOT / "trip_reset.flag"   # Qt touches this to request a trip reset
+# Runtime dir shared with the cluster (state.json, carplay_status.json,
+# trip_reset.flag all live here). The launcher exports W124_RUNTIME_DIR; fall
+# back to the legacy qt_cluster/ location for standalone runs.
+_REPO_ROOT  = pathlib.Path(__file__).resolve().parents[2]
+RUNTIME_DIR = pathlib.Path(os.environ.get("W124_RUNTIME_DIR", _REPO_ROOT / "qt_cluster"))
+STATE_FILE  = RUNTIME_DIR / "state.json"
+ODO_FILE    = RUNTIME_DIR / "data" / "odometer.json"
+FLAG_FILE   = RUNTIME_DIR / "trip_reset.flag"   # Qt touches this to request a trip reset
 UDP_HOST   = "127.0.0.1"
 UDP_PORT   = 9100
 

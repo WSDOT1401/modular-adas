@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:w124-dash:contracts:vehicle_state",
+  "title": "W124 vehicle-state UDP payload",
+  "description": "UTF-8 JSON datagrams pushed to udp://127.0.0.1:9100 and parsed by VehicleState::applyJson(). All fields are optional — producers send partial updates. The C++ consumer SILENTLY DROPS unrecognized keys, so additionalProperties is false here to catch producer typos during validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "speed":        { "type": "number", "minimum": 0, "description": "km/h" },
+    "odo":          { "type": "number", "minimum": 0, "description": "total odometer, km" },
+    "trip":         { "type": "number", "minimum": 0, "description": "trip meter, km (wraps at 1000)" },
+    "oil_temp":     { "type": "number", "description": "oil temperature, deg C" },
+    "outside_temp": { "type": "number", "description": "outside temperature, deg C" },
+    "voltage":      { "type": "number", "minimum": 0, "description": "battery voltage, V" },
+
+    "lane_warning":    { "type": "boolean", "description": "ADAS (PROPOSED, not yet parsed by consumer): lane departure detected" },
+    "lane_direction":  { "type": "string", "enum": ["left", "right", "none"], "description": "ADAS (PROPOSED): drift direction" },
+    "lane_confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "ADAS (PROPOSED): detection confidence 0..1" }
+  }
+}

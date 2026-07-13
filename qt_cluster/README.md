@@ -55,15 +55,17 @@ Run with external state file:
 
 ## Pi service setup (optional)
 
+Run from the repo root (the launcher and unit moved to `deploy/`):
+
 ```bash
-chmod +x pi/start_qt_kiosk.sh
-sudo cp pi/w124-qt.service /etc/systemd/system/
+chmod +x deploy/start_kiosk.sh
+sudo cp deploy/systemd/w124-cluster.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable w124-qt.service
-sudo systemctl start w124-qt.service
+sudo systemctl enable w124-cluster.service
+sudo systemctl start w124-cluster.service
 ```
 
-Adjust paths in `pi/w124-qt.service` if your project is not under `/home/pi/Zeiger/qt_cluster`.
+Adjust paths in `deploy/systemd/w124-cluster.service` if your repo is not under `/home/pi/Zeiger/w124-dash`.
 
 ---
 
@@ -121,23 +123,23 @@ PC817 pin 4 (collector) → Pi GPIO BCM17
 
 Result: idle = HIGH (3.3V), each speed pulse = LOW — safe for Pi GPIO.
 
-**Calibration:** edit `PULSES_PER_KM` in `pi/vss_reader.py`.
+**Calibration:** edit `PULSES_PER_KM` in `services/vss/vss_reader.py`.
 Default is 8000 (W124 typical). Drive a measured 1 km, count pulses logged,
 adjust the constant to match.
 
 ### Running the VSS reader
 
-The `start_qt_kiosk.sh` script launches `vss_reader.py` automatically.
-To disable during bench testing:
+The `deploy/start_kiosk.sh` script launches `services/vss/vss_reader.py`
+automatically. To disable during bench testing (run from the repo root):
 
 ```bash
-VSS_DISABLE=1 ./pi/start_qt_kiosk.sh
+VSS_DISABLE=1 ./deploy/start_kiosk.sh
 ```
 
-For bench testing with simulated speed, run `mock_state_writer.py` separately:
+For bench testing with simulated speed, run the mock writer separately:
 
 ```bash
-python3 pi/mock_state_writer.py
+python3 services/vss/mock_state_writer.py --udp --udp-port=9100
 ```
 
 ### Power

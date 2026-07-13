@@ -59,3 +59,22 @@ list.txt
 __pycache__/
 *.py[cod]
 qt_cluster/state.json
+
+# --- AI assistant local guidance (not committed) ---
+CLAUDE.md
+
+# --- Python packaging (editable installs of libs/) ---
+*.egg-info/
+.eggs/
+
+# --- Lane-departure sample media (keep the dir, not the footage) ---
+services/lane_departure/samples/*
+!services/lane_departure/samples/.gitkeep
+
+# --- Runtime IPC files (generated; shared between producers and cluster) ---
+carplay_status.json
+trip_reset.flag
+
+playground/
+*.pt
+*.jpg

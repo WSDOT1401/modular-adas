@@ -9,13 +9,19 @@ Realistic W124 driving scenario — loops forever:
 """
 import json
 import math
+import os
 import pathlib
 import random
 import socket
 import sys
 import time
 
-STATE = pathlib.Path(__file__).resolve().parent.parent / "state.json"
+# Runtime dir shared with the cluster; launcher exports W124_RUNTIME_DIR, else
+# fall back to the legacy qt_cluster/ location.
+_RUNTIME_DIR = pathlib.Path(
+    os.environ.get("W124_RUNTIME_DIR", pathlib.Path(__file__).resolve().parents[2] / "qt_cluster")
+)
+STATE = _RUNTIME_DIR / "state.json"
 
 # UDP mode: pass --udp [--udp-port=N] to send datagrams instead of writing a file
 _UDP_PORT = 9100

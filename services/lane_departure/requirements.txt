@@ -1,0 +1,10 @@
+# Lane-departure runtime deps.
+#
+# Install the shared protocol lib (editable) from the repo root first:
+#   pip install -e libs/protocol/python
+#
+numpy>=1.24
+opencv-python>=4.8
+#
+# Pi only (CSI camera). Not needed for off-Pi / file-replay development:
+# picamera2 ; platform_machine == "aarch64"
