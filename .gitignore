@@ -78,3 +78,5 @@ trip_reset.flag
 playground/
 *.pt
 *.jpg
+*.mp4
+runs/
