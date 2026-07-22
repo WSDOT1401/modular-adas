@@ -75,7 +75,6 @@ services/lane_departure/samples/*
 carplay_status.json
 trip_reset.flag
 
-playground/
 *.pt
 *.jpg
 *.mp4
