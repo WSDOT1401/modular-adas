@@ -27,7 +27,7 @@ are fine). Parsed by `VehicleState::applyJson()` in the Qt cluster.
 > `applyJson()`. Sending them early is harmless. Translate snake_case ⇄
 > camelCase only at the `applyJson()` boundary.
 
-The machine-readable spec is [`vehicle_state.schema.json`](vehicle_state.schema.json)
+The machine-readable spec is [`schema/vehicle_state.schema.json`](schema/vehicle_state.schema.json)
 (`additionalProperties: false`, so validating a producer's payload against it
 catches misspelled keys before they vanish on the wire).
 

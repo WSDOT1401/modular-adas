@@ -4,8 +4,8 @@ set -euo pipefail
 # This script lives in deploy/ — the repo root is one level up.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# The cluster app still lives in qt_cluster/ (moves to apps/cluster/ in a later phase).
-CLUSTER_DIR="$REPO_ROOT/qt_cluster"
+# The cluster app lives in apps/cluster/.
+CLUSTER_DIR="$REPO_ROOT/apps/cluster"
 BUILD_DIR="$CLUSTER_DIR/build"
 
 # Shared runtime dir — where the cluster reads/writes state.json,
@@ -19,7 +19,7 @@ CARPLAY_DIR="$REPO_ROOT/services/carplay"
 
 if [[ ! -x "$BUILD_DIR/w124_cluster" ]]; then
   echo "Binary not found at $BUILD_DIR/w124_cluster" >&2
-  echo "Build first: cmake -S qt_cluster -B qt_cluster/build && cmake --build qt_cluster/build -j" >&2
+  echo "Build first: cmake -S apps/cluster -B apps/cluster/build && cmake --build apps/cluster/build -j" >&2
   exit 1
 fi
 

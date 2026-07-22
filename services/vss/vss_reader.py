@@ -40,9 +40,9 @@ ODO_SAVE_EVERY  = 50        # Persist odometer every N write cycles (~6 s)
 # ── Paths ──────────────────────────────────────────────────────────────────
 # Runtime dir shared with the cluster (state.json, carplay_status.json,
 # trip_reset.flag all live here). The launcher exports W124_RUNTIME_DIR; fall
-# back to the legacy qt_cluster/ location for standalone runs.
+# back to the cluster's apps/cluster/ location for standalone runs.
 _REPO_ROOT  = pathlib.Path(__file__).resolve().parents[2]
-RUNTIME_DIR = pathlib.Path(os.environ.get("W124_RUNTIME_DIR", _REPO_ROOT / "qt_cluster"))
+RUNTIME_DIR = pathlib.Path(os.environ.get("W124_RUNTIME_DIR", _REPO_ROOT / "apps" / "cluster"))
 STATE_FILE  = RUNTIME_DIR / "state.json"
 ODO_FILE    = RUNTIME_DIR / "data" / "odometer.json"
 FLAG_FILE   = RUNTIME_DIR / "trip_reset.flag"   # Qt touches this to request a trip reset

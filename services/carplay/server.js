@@ -30,9 +30,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // carplay_status.json must land in the cluster's runtime dir (the dir of the
 // cluster's --state-file). The launcher exports W124_RUNTIME_DIR; fall back to
-// the legacy qt_cluster/ location for standalone runs.
+// the cluster's apps/cluster/ location for standalone runs.
 const RUNTIME_DIR = process.env.W124_RUNTIME_DIR ||
-    path.join(__dirname, '..', '..', 'qt_cluster')
+    path.join(__dirname, '..', '..', 'apps', 'cluster')
 const STATUS_FILE = process.env.CARPLAY_STATUS_FILE ||
     path.join(RUNTIME_DIR, 'carplay_status.json')
 

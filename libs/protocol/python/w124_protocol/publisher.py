@@ -35,7 +35,7 @@ class UdpPublisher:
 
         Keys should come from ``w124_protocol.keys``; the consumer silently
         drops unrecognized keys, so this intentionally does not validate them
-        (validate against vehicle_state.schema.json in tests if you want to
+        (validate against schema/vehicle_state.schema.json in tests if you want to
         catch typos early).
         """
         self._sock.sendto(json.dumps(payload).encode("utf-8"), self._addr)
