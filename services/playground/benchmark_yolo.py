@@ -4,6 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 from ultralytics import YOLO
+import cv2
 
 MODEL = "yolo26n.pt"          # note: 'yolo26n.pt', not 'yolo26nano.pt'
 IMGSZ = 640
@@ -12,18 +13,18 @@ TARGET_FPS = 18               # lower bound of the 18-25 FPS goal
 
 # label -> ultralytics export format ("pt" = native PyTorch, no export)
 FORMATS = {
-    "PyTorch":    "pt",
-    "ONNX":       "onnx",
-    "NCNN":       "ncnn",
-    "OpenVINO":   "openvino",
-    "ExecuTorch": "executorch",
+    "PyTorch":    ("pt", {}),
+    "ONNX":       ("onnx", {}),
+    "NCNN":       ("ncnn", {}),
+    "NCNN-FP16":  ("ncnn", {"half": True}),
+    "OpenVINO":   ("openvino", {})
 }
 
 
 def measure(weights):
     """Return (mean inference ms, mean total-pipeline ms) on a fixed 640x640 frame."""
     model = YOLO(weights)
-    frame = np.zeros((IMGSZ, IMGSZ, 3), dtype=np.uint8)
+    frame = next(iter(cv2.VideoCapture("dash.mp4").read()[1:]))
 
     for _ in range(WARMUP):
         model.predict(frame, imgsz=IMGSZ, verbose=False)
@@ -38,9 +39,9 @@ def measure(weights):
 
 
 rows = []
-for name, fmt in FORMATS.items():
+for name, (fmt, kw) in FORMATS.items():
     try:
-        weights = MODEL if fmt == "pt" else YOLO(MODEL).export(format=fmt, imgsz=IMGSZ)
+        weights = MODEL if fmt == "pt" else YOLO(MODEL).export(format=fmt, imgsz=IMGSZ, **kw)
         infer_ms, total_ms = measure(weights)
         fps = 1000 / total_ms
         rows.append({
@@ -52,7 +53,7 @@ for name, fmt in FORMATS.items():
             "Meets target": "yes" if fps >= TARGET_FPS else "no",
         })
     except Exception as e:
-        rows.append({"Format": name, "Status": f"fail: {type(e).__name__}",
+        rows.append({"Format": name, "Status": f"fail: {e}"[:70],
                      "Infer (ms)": None, "Total (ms)": None, "FPS": None,
                      "Meets target": "-"})
 

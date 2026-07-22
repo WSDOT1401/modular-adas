@@ -1,0 +1,6 @@
+Format,Status,Infer (ms),Total (ms),FPS,Meets target
+PyTorch,ok,198.2,203.0,4.9,no
+ONNX,ok,154.6,163.9,6.1,no
+NCNN,ok,92.0,101.8,9.8,no
+NCNN-FP16,ok,90.9,101.3,9.9,no
+OpenVINO,ok,123.1,130.8,7.6,no
