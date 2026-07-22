@@ -79,3 +79,5 @@ trip_reset.flag
 *.jpg
 *.mp4
 runs/
+playground/*
+!playground/*.csv
