@@ -110,6 +110,13 @@ is fine.
   traffic sign inverts its meaning — a flipped "turn right" *is* "turn left", and
   mirrored numerals aren't real signs. Left at the default this quietly corrupts
   the `mandatory` class.
+- **Only 600 of GTSDB's 900 images may be annotated.** The original competition
+  release withheld the test ground truth, so many mirrors ship
+  `TrainIJCNN2013/` with a `gt.txt` and `TestIJCNN2013Download/` without one.
+  There the default `--split-at 600` yields an empty val split (the converter
+  refuses and tells you); pass `--split-at 480` to take a contiguous 80/20 split
+  of the labelled images. Those numbers are then **not** comparable to published
+  GTSDB results, which use the official 600/300 split.
 - **Official IJCNN 2013 split** (`00000–00599` train, `00600–00899` val). GTSDB
   frames come from continuous driving video, so a *random* split would put
   near-duplicate consecutive frames on both sides and inflate mAP into

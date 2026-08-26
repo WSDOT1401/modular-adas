@@ -418,3 +418,92 @@ def test_image_dir_hint_never_escapes_the_dataset(tmp_path):
     message = str(excinfo.value)
     assert "unrelated_project" not in message, message
     assert "Images" in message
+
+
+def _train_only_root(tmp_path, count=20):
+    """The official competition release: only the train set is annotated.
+
+    GTSDB's test ground truth was withheld for the competition, so a faithful
+    mirror has 600 labelled train images and 300 unlabelled test images. The
+    600-index split rule then puts everything in train.
+    """
+    root = tmp_path / "official"
+    root.mkdir()
+    lines = []
+    for idx in range(count):
+        _write_ppm(root / f"{idx:05d}.ppm", IMG_W, IMG_H)
+        lines.append(f"{idx:05d}.ppm;10;10;30;30;1")
+    (root / "gt.txt").write_text("\n".join(lines) + "\n")
+    return root
+
+
+def test_split_at_carves_a_val_split_from_labelled_images(tmp_path):
+    root = _train_only_root(tmp_path, count=20)
+    summary = prepare(root, tmp_path / "ds", "4class", split_at=16)
+    assert summary["splits"]["train"]["images"] == 16
+    assert summary["splits"]["val"]["images"] == 4
+    assert summary["split_at"] == 16
+
+
+def test_split_at_is_contiguous_not_random(tmp_path):
+    """Consecutive GTSDB frames are near-duplicates, so val must be a tail block."""
+    root = _train_only_root(tmp_path, count=20)
+    out = tmp_path / "ds"
+    prepare(root, out, "4class", split_at=16)
+    train = {int(p.stem) for p in (out / "_images" / "train").glob("*.png")}
+    val = {int(p.stem) for p in (out / "_images" / "val").glob("*.png")}
+    assert train == set(range(16))
+    assert val == set(range(16, 20))
+
+
+def test_default_split_at_is_the_official_600(tmp_path):
+    root = _train_only_root(tmp_path, count=20)
+    with pytest.raises(ValueError, match="empty val split"):
+        prepare(root, tmp_path / "ds", "4class")
+
+
+def test_empty_split_message_suggests_split_at(tmp_path):
+    root = _train_only_root(tmp_path, count=20)
+    with pytest.raises(ValueError) as excinfo:
+        prepare(root, tmp_path / "ds", "4class")
+    assert "--split-at" in str(excinfo.value)
+
+
+def test_split_at_survives_ultralytics(tmp_path):
+    pytest.importorskip("ultralytics")
+    from ultralytics.data.dataset import YOLODataset
+    from ultralytics.data.utils import check_det_dataset
+
+    root = _train_only_root(tmp_path, count=20)
+    summary = prepare(root, tmp_path / "ds", "4class", split_at=16)
+    data = check_det_dataset(summary["data_yaml"])
+    found = {
+        split: sum(len(l["bboxes"]) for l in
+                   YOLODataset(img_path=str(data[split]), imgsz=640,
+                               data=data, augment=False).labels)
+        for split in ("train", "val")
+    }
+    assert found == {"train": 16, "val": 4}
+
+
+def test_rerun_with_a_different_split_does_not_leak_across_splits(tmp_path):
+    """Changing --split-at must not leave an image in BOTH splits.
+
+    images/ was only ever added to, never pruned, so images that moved from
+    train to val stayed linked under train as well — silent train/val
+    contamination, and the mAP it produces is meaningless.
+    """
+    root = _train_only_root(tmp_path, count=20)
+    out = tmp_path / "ds"
+
+    prepare(root, out, "4class", split_at=16)
+    prepare(root, out, "4class", split_at=12)
+
+    train = {p.stem for p in (out / "gtsdb-4class" / "images" / "train").iterdir()}
+    val = {p.stem for p in (out / "gtsdb-4class" / "images" / "val").iterdir()}
+    assert not (train & val), f"images in both splits: {sorted(train & val)}"
+    assert len(train) == 12 and len(val) == 8
+
+    # labels must agree with images, or ultralytics silently reads background
+    train_labels = {p.stem for p in (out / "gtsdb-4class" / "labels" / "train").iterdir()}
+    assert train_labels == train

@@ -123,8 +123,14 @@ def parse_gt(gt_path: pathlib.Path) -> dict[str, list[tuple[int, int, int, int, 
     return dict(boxes)
 
 
-def split_for(index: int) -> str:
-    return "train" if index < TRAIN_SPLIT_END else "val"
+def split_for(index: int, split_at: int = TRAIN_SPLIT_END) -> str:
+    """Which split a filename index belongs to.
+
+    Contiguous by index, never random: GTSDB frames come from continuous driving
+    video, so shuffling would put near-duplicate consecutive frames on both
+    sides of the split and inflate mAP into meaninglessness.
+    """
+    return "train" if index < split_at else "val"
 
 
 def _to_yolo(
@@ -193,7 +199,8 @@ def _resolve_sources(
 
 
 def _collect_records(
-    sources: list[tuple[str | None, pathlib.Path]], search_root: pathlib.Path
+    sources: list[tuple[str | None, pathlib.Path]], search_root: pathlib.Path,
+    split_at: int = TRAIN_SPLIT_END,
 ) -> list[tuple[str, int, pathlib.Path, list[tuple[int, int, int, int, int]]]]:
     """Flatten the sources into ``[(split, index, ppm_path, boxes)]``.
 
@@ -218,7 +225,7 @@ def _collect_records(
             except ValueError:
                 print(f"  skipping non-numeric filename {image.name}", file=sys.stderr)
                 continue
-            split = split_override or split_for(index)
+            split = split_override or split_for(index, split_at)
             records.append((split, index, image, annotations.get(image.stem, [])))
     if not records:
         searched = ", ".join(str(d) for _, d in sources)
@@ -297,9 +304,17 @@ def _link_images(dataset_dir: pathlib.Path, entries) -> None:
 
     Hardlinks rather than a symlinked directory on purpose — see the module
     docstring.
+
+    Rebuilt from scratch each run, exactly like ``labels/``. Merely adding what
+    is missing leaves images from a previous ``--split-at`` still linked under
+    their old split, so the same frame appears in train *and* val and the
+    resulting mAP is meaningless.
     """
+    images_root = dataset_dir / "images"
+    if images_root.exists():
+        shutil.rmtree(images_root)
     for split in SPLITS:
-        (dataset_dir / "images" / split).mkdir(parents=True, exist_ok=True)
+        (images_root / split).mkdir(parents=True)
     for split, _index, cached, _w, _h, _boxes in entries:
         dst = dataset_dir / "images" / split / cached.name
         if not dst.exists():
@@ -307,7 +322,8 @@ def _link_images(dataset_dir: pathlib.Path, entries) -> None:
 
 
 def _empty_split_message(
-    empty: list[str], records, sources, candidates: list[pathlib.Path], explicit: bool
+    empty: list[str], entries, sources, candidates: list[pathlib.Path], explicit: bool,
+    split_at: int = TRAIN_SPLIT_END,
 ) -> str:
     """Explain an empty split here, where the cause is still visible.
 
@@ -315,13 +331,13 @@ def _empty_split_message(
     "No images found in .../images/val", which points at the symptom rather than
     the dataset layout that caused it.
     """
-    indices = sorted(entry[1] for entry in records)
+    indices = sorted(entry[1] for entry in entries)
     lines = [
         f"GTSDB conversion produced an empty {'/'.join(empty)} split — stopping now, "
         "because training would otherwise fail later inside ultralytics with a "
         '"No images found" error that does not explain why.',
         "",
-        f"Read {len(records)} images from:",
+        f"Read {len(entries)} images from:",
         *(f"  {d}" for _, d in sources),
         f"  filename indices: {indices[0]:05d}..{indices[-1]:05d}",
     ]
@@ -329,26 +345,36 @@ def _empty_split_message(
         lines += ["", "One of --train-dir / --val-dir contains no .ppm images."]
         return "\n".join(lines)
 
-    lines.append(f"  split rule: index < {TRAIN_SPLIT_END} -> train, else val")
+    lines.append(f"  split rule: index < {split_at} -> train, else val")
+    suggested = max(1, int(len(indices) * 0.8))
+    lines += [
+        "",
+        "Pick whichever fits your dataset:",
+        "",
+        f"  1. Only the train set is annotated. GTSDB's original competition release",
+        f"     withheld the test ground truth, so a faithful mirror has 600 labelled",
+        f"     images and 300 unlabelled ones. Carve a val split out of the labelled",
+        f"     images (contiguous tail, so consecutive frames do not leak):",
+        "",
+        f"       --split-at {suggested}",
+        "",
+        "  2. Train and test ship as separate directories and BOTH have a gt.txt:",
+        "",
+        "       --train-dir <train subdir> --val-dir <test subdir>",
+        "",
+        "  3. A directory holds all 900 images with a gt.txt covering them (the",
+        "     post-competition FullIJCNN2013 release): point --gtsdb-root at it and",
+        "     keep the default --split-at 600.",
+    ]
     if len(candidates) > 1:
         lines += [
             "",
             f"This dataset has {len(candidates)} directories containing a gt.txt, and only "
             "the first was read:",
             *(f"  {'-> ' if c == sources[0][1] else '   '}{c}" for c in candidates),
-            "",
-            "That layout ships train and test as separate directories, each numbered "
-            "from 00000, so the index rule cannot tell them apart. Re-run with, e.g.:",
-            "",
-            "  --train-dir TrainIJCNN2013 --val-dir TestIJCNN2013",
         ]
     else:
-        lines += [
-            "",
-            "This looks like only part of GTSDB — the full benchmark is 900 images, "
-            "00000..00899. Point --gtsdb-root at a directory holding all of them, or "
-            "pass --train-dir / --val-dir to split by directory instead.",
-        ]
+        pass
     return "\n".join(lines)
 
 
@@ -358,13 +384,21 @@ def prepare(
     label_set: str,
     train_dir: str | pathlib.Path | None = None,
     val_dir: str | pathlib.Path | None = None,
+    split_at: int = TRAIN_SPLIT_END,
 ) -> dict:
-    """Build ``<out>/gtsdb-<label_set>/`` and return a summary of what was written."""
+    """Build ``<out>/gtsdb-<label_set>/`` and return a summary of what was written.
+
+    ``split_at`` moves the train/val boundary. The default 600 is the official
+    IJCNN 2013 split, valid only when all 900 annotated images are present. The
+    original competition release withheld the test ground truth, so a faithful
+    mirror has just the 600 labelled train images — there, pass a smaller value
+    (e.g. 480) to carve a val split out of what is annotated.
+    """
     gtsdb_root, out = pathlib.Path(gtsdb_root), pathlib.Path(out)
     names, mapping = classes.label_set(label_set)
 
     sources, candidates = _resolve_sources(gtsdb_root, train_dir, val_dir)
-    records = _collect_records(sources, gtsdb_root)
+    records = _collect_records(sources, gtsdb_root, split_at)
 
     cache_dir = out / "_images"
     entries, converted = _cache_images(records, cache_dir)
@@ -409,7 +443,9 @@ def prepare(
     empty = [split for split in SPLITS if stats[split]["images"] == 0]
     if empty:
         raise ValueError(
-            _empty_split_message(empty, entries, sources, candidates, train_dir is not None)
+            _empty_split_message(
+                empty, entries, sources, candidates, train_dir is not None, split_at
+            )
         )
 
     _link_images(dataset_dir, entries)
@@ -425,6 +461,7 @@ def prepare(
 
     return {
         "label_set": label_set,
+        "split_at": split_at,
         "dataset_dir": str(dataset_dir),
         "data_yaml": str(data_yaml),
         "sources": [str(d) for _, d in sources],
@@ -439,6 +476,7 @@ def _print_summary(summary: dict) -> None:
     print(f"\n  {summary['label_set']}  ->  {summary['dataset_dir']}")
     for source in summary["sources"]:
         print(f"  source: {source}")
+    print(f"  split at index: {summary['split_at']}")
     print(f"  PNGs encoded this run: {summary['converted']}  (rest served from cache)")
     for split, s in summary["splits"].items():
         print(
@@ -461,13 +499,18 @@ def main(argv: list[str] | None = None) -> int:
                              "--train-dir and --val-dir (relative to --gtsdb-root, or absolute). "
                              "Needed when a dataset ships TrainIJCNN2013/ + TestIJCNN2013/.")
     parser.add_argument("--val-dir", default=None, help="see --train-dir")
+    parser.add_argument("--split-at", type=int, default=TRAIN_SPLIT_END,
+                        help=f"filename index where val begins (default {TRAIN_SPLIT_END}, the "
+                             "official IJCNN 2013 split). Lower it when only the train set is "
+                             "annotated, e.g. --split-at 480 for an 80/20 split of 600 images.")
     parser.add_argument("--out", type=pathlib.Path,
                         default=pathlib.Path(__file__).resolve().parent / "datasets",
                         help="where to write the YOLO dataset(s)")
     args = parser.parse_args(argv)
     try:
         summary = prepare(args.gtsdb_root, args.out, args.label_set,
-                          train_dir=args.train_dir, val_dir=args.val_dir)
+                          train_dir=args.train_dir, val_dir=args.val_dir,
+                          split_at=args.split_at)
     except (ValueError, FileNotFoundError) as exc:
         # These are dataset-layout problems, not crashes — a traceback just
         # buries the explanation.
