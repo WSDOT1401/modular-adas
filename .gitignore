@@ -82,3 +82,11 @@ trip_reset.flag
 *.jpg
 *.mp4
 runs/
+.env
+# --- Traffic-sign experiment (experiments/traffic-sign_recognition) ---
+# Generated YOLO datasets: the PNG cache and per-label-set labels. Fully
+# rebuildable from GTSDB with prepare_gtsdb.py, so not worth versioning.
+experiments/traffic-sign_recognition/datasets/
+# results/ IS tracked, via Git LFS (see .gitattributes). The blanket *.pt rule
+# above would otherwise silently swallow the trained weights.
+!experiments/traffic-sign_recognition/results/**/*.pt

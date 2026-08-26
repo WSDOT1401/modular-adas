@@ -1,0 +1,13 @@
+# Git LFS — the large binary artifacts produced by
+# experiments/traffic-sign_recognition (trained weights, plots, NCNN blobs).
+#
+# Scoped to that one results/ path by extension, deliberately. A repo-wide
+# `*.pt` or `*.mp4` rule would also swallow the 455 MB dashcam clip in
+# experiments/traffic-sign_recognition/ and ~260 MB of video in
+# experiments/distance_estimation/ — together most of GitHub's 1 GB free LFS
+# quota, for files nothing needs versioned. The grid's own artifacts are ~80 MB.
+#
+# .csv / .yaml / .md / .param stay in normal git: small, diffable, greppable.
+experiments/traffic-sign_recognition/results/**/*.pt  filter=lfs diff=lfs merge=lfs -text
+experiments/traffic-sign_recognition/results/**/*.png filter=lfs diff=lfs merge=lfs -text
+experiments/traffic-sign_recognition/results/**/*.bin filter=lfs diff=lfs merge=lfs -text
