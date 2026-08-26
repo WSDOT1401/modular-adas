@@ -58,6 +58,11 @@ $CONDA/python -m pytest tests -v
 $CONDA/python prepare_gtsdb.py --gtsdb-root /path/to/FullIJCNN2013 --label-set 4class
 $CONDA/python prepare_gtsdb.py --gtsdb-root /path/to/FullIJCNN2013 --label-set 1class
 
+# ...but if your copy ships train and test as separate directories, each with
+# its own gt.txt and each numbered from 00000, split by directory instead:
+$CONDA/python prepare_gtsdb.py --gtsdb-root /path/to/GTSDB --label-set 4class \
+    --train-dir TrainIJCNN2013 --val-dir TestIJCNN2013
+
 # one run, or the whole grid
 $CONDA/python train.py --data datasets/gtsdb-4class/data.yaml --label-set 4class --imgsz 640
 $CONDA/python run_grid.py --datasets datasets
@@ -118,6 +123,13 @@ is fine.
   comparison is confounded by an LR difference; 640-vs-1024 *within* a label set
   is controlled (same `nc`, `seed=0`, `deterministic=True`). `report.py` records
   the LR each run actually used so this can be pinned down later from evidence.
+- **Two dataset layouts are supported.** One directory of 900 images
+  (`00000–00899`) splits on the filename index. A copy that ships
+  `TrainIJCNN2013/` + `TestIJCNN2013/` numbers *both* from `00000`, so the index
+  rule cannot separate them — pass `--train-dir`/`--val-dir` and it splits by
+  directory. The converter refuses to emit an empty split, because ultralytics
+  would otherwise fail much later with a "No images found" error that says
+  nothing about the layout.
 - **PNG, not JPEG.** Some signs are 16 px across, where JPEG ringing is a real
   cost.
 - **Images are hardlinked, not symlinked.** `check_det_dataset` *resolves*

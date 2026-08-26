@@ -47,16 +47,18 @@ TRAIN_SPLIT_END = 600
 SPLITS = ("train", "val")
 
 
-def find_gtsdb_dir(root: pathlib.Path) -> pathlib.Path:
-    """Locate the directory holding ``gt.txt`` beneath ``root``.
+def find_gtsdb_candidates(root: pathlib.Path) -> list[pathlib.Path]:
+    """Every directory beneath ``root`` holding a ``gt.txt``, shallowest first.
 
-    A Kaggle Dataset may be uploaded flat or with the original
-    ``FullIJCNN2013/`` wrapper, so search rather than assume a layout.
+    A Kaggle Dataset may be uploaded flat, wrapped in ``FullIJCNN2013/``, or split
+    into ``TrainIJCNN2013/`` + ``TestIJCNN2013/`` — hence the search. Returns all
+    matches so the caller can say which one it used and which it ignored; picking
+    one silently is how a whole split goes missing.
     """
-    matches = sorted(root.rglob("gt.txt"))
+    matches = sorted(root.rglob("gt.txt"), key=lambda p: (len(p.parts), str(p)))
     if not matches:
         raise FileNotFoundError(f"no gt.txt found anywhere under {root}")
-    return matches[0].parent
+    return [m.parent for m in matches]
 
 
 def parse_gt(gt_path: pathlib.Path) -> dict[str, list[tuple[int, int, int, int, int]]]:
@@ -105,36 +107,100 @@ def _to_yolo(
     )
 
 
-def _cache_images(image_dir: pathlib.Path, cache_dir: pathlib.Path) -> tuple[dict[int, tuple[int, int]], int]:
-    """Decode every ``NNNNN.ppm`` to ``<cache>/<split>/NNNNN.png`` once.
+def _resolve_sources(
+    gtsdb_root: pathlib.Path,
+    train_dir: str | pathlib.Path | None,
+    val_dir: str | pathlib.Path | None,
+) -> tuple[list[tuple[str | None, pathlib.Path]], list[pathlib.Path]]:
+    """Work out where images come from and how they map to splits.
 
-    Returns ``({index: (width, height)}, n_converted)``. Pillow rather than cv2
-    because ``Image.open`` reads only the header, so sizes are free on re-runs
-    and an already-converted image is never re-encoded.
+    Two modes:
+
+    * **explicit** — ``train_dir`` / ``val_dir`` name one directory per split
+      (relative to ``gtsdb_root``, or absolute). Split comes from *directory
+      membership*, which is the only thing that works when a redistribution
+      ships ``TrainIJCNN2013/`` + ``TestIJCNN2013/`` and numbers both from
+      00000.
+    * **single directory** — one ``gt.txt`` with all 900 images; split comes
+      from the filename index (the official IJCNN 2013 rule).
+
+    Returns ``([(split_or_None, image_dir)], all_gt_txt_dirs)``.
     """
-    sizes: dict[int, tuple[int, int]] = {}
+    if bool(train_dir) != bool(val_dir):
+        raise ValueError("--train-dir and --val-dir must be given together")
+
+    if train_dir is not None:
+        sources: list[tuple[str | None, pathlib.Path]] = []
+        for split, raw in (("train", train_dir), ("val", val_dir)):
+            path = pathlib.Path(raw)
+            path = path if path.is_absolute() else gtsdb_root / path
+            if not (path / "gt.txt").exists():
+                raise FileNotFoundError(f"no gt.txt in {path} (needed for the {split} split)")
+            sources.append((split, path))
+        return sources, [d for _, d in sources]
+
+    candidates = find_gtsdb_candidates(gtsdb_root)
+    chosen = candidates[0]
+    if len(candidates) > 1:
+        print(f"  NOTE: {len(candidates)} directories contain a gt.txt. Reading only:")
+        print(f"    -> {chosen}")
+        for other in candidates[1:]:
+            print(f"       ignoring {other}")
+    return [(None, chosen)], candidates
+
+
+def _collect_records(
+    sources: list[tuple[str | None, pathlib.Path]]
+) -> list[tuple[str, int, pathlib.Path, list[tuple[int, int, int, int, int]]]]:
+    """Flatten the sources into ``[(split, index, ppm_path, boxes)]``.
+
+    Each source directory carries its own ``gt.txt``. Images absent from it keep
+    an empty box list — they become background negatives, not dropped rows.
+    """
+    records = []
+    for split_override, image_dir in sources:
+        annotations = parse_gt(image_dir / "gt.txt")
+        for ppm in sorted(image_dir.glob("*.ppm")):
+            try:
+                index = int(ppm.stem)
+            except ValueError:
+                print(f"  skipping non-numeric filename {ppm.name}", file=sys.stderr)
+                continue
+            split = split_override or split_for(index)
+            records.append((split, index, ppm, annotations.get(ppm.name, [])))
+    if not records:
+        raise FileNotFoundError(
+            "no .ppm images found in " + ", ".join(str(d) for _, d in sources)
+        )
+    return records
+
+
+def _cache_images(records, cache_dir: pathlib.Path) -> tuple[dict[tuple[str, int], tuple[int, int]], int]:
+    """Decode each ``NNNNN.ppm`` to ``<cache>/<split>/NNNNN.png`` exactly once.
+
+    Keyed by ``(split, index)`` because the explicit-directory mode can legally
+    have a train 00000 *and* a val 00000 — they live in different split dirs, so
+    they never collide, but the size map has to distinguish them.
+
+    Pillow rather than cv2: ``Image.open`` reads only the header, so sizes are
+    free on re-runs and an already-converted image is never re-encoded.
+    """
+    sizes: dict[tuple[str, int], tuple[int, int]] = {}
     converted = 0
     for split in SPLITS:
         (cache_dir / split).mkdir(parents=True, exist_ok=True)
 
-    for ppm in sorted(image_dir.glob("*.ppm")):
-        try:
-            index = int(ppm.stem)
-        except ValueError:
-            print(f"  skipping non-numeric filename {ppm.name}", file=sys.stderr)
-            continue
-        png = cache_dir / split_for(index) / f"{ppm.stem}.png"
+    for split, index, ppm, _ in records:
+        png = cache_dir / split / f"{index:05d}.png"
         with Image.open(ppm) as im:
-            sizes[index] = im.size
+            sizes[(split, index)] = im.size
             if not png.exists():
                 im.convert("RGB").save(png)
                 converted += 1
-    if not sizes:
-        raise FileNotFoundError(f"no .ppm images found in {image_dir}")
     return sizes, converted
 
 
-def _link_images(dataset_dir: pathlib.Path, cache_dir: pathlib.Path, indices: list[int]) -> None:
+def _link_images(dataset_dir: pathlib.Path, cache_dir: pathlib.Path, records) -> None:
     """Populate ``<dataset>/images/<split>/`` with hardlinks into the PNG cache.
 
     Hardlinks rather than a symlinked directory on purpose — see the module
@@ -142,10 +208,8 @@ def _link_images(dataset_dir: pathlib.Path, cache_dir: pathlib.Path, indices: li
     and dataset land on different devices).
     """
     for split in SPLITS:
-        target = dataset_dir / "images" / split
-        target.mkdir(parents=True, exist_ok=True)
-    for index in indices:
-        split = split_for(index)
+        (dataset_dir / "images" / split).mkdir(parents=True, exist_ok=True)
+    for split, index, _, _ in records:
         src = cache_dir / split / f"{index:05d}.png"
         dst = dataset_dir / "images" / split / f"{index:05d}.png"
         if dst.exists():
@@ -156,16 +220,68 @@ def _link_images(dataset_dir: pathlib.Path, cache_dir: pathlib.Path, indices: li
             shutil.copy2(src, dst)
 
 
-def prepare(gtsdb_root: pathlib.Path, out: pathlib.Path, label_set: str) -> dict:
+def _empty_split_message(
+    empty: list[str], records, sources, candidates: list[pathlib.Path], explicit: bool
+) -> str:
+    """Explain an empty split here, where the cause is still visible.
+
+    Without this the run continues and ultralytics dies much later on
+    "No images found in .../images/val", which points at the symptom rather than
+    the dataset layout that caused it.
+    """
+    indices = sorted(index for _, index, _, _ in records)
+    lines = [
+        f"GTSDB conversion produced an empty {'/'.join(empty)} split — stopping now, "
+        "because training would otherwise fail later inside ultralytics with a "
+        '"No images found" error that does not explain why.',
+        "",
+        f"Read {len(records)} images from:",
+        *(f"  {d}" for _, d in sources),
+        f"  filename indices: {indices[0]:05d}..{indices[-1]:05d}",
+    ]
+    if explicit:
+        lines += ["", "One of --train-dir / --val-dir contains no .ppm images."]
+        return "\n".join(lines)
+
+    lines.append(f"  split rule: index < {TRAIN_SPLIT_END} -> train, else val")
+    if len(candidates) > 1:
+        lines += [
+            "",
+            f"This dataset has {len(candidates)} directories containing a gt.txt, and only "
+            "the first was read:",
+            *(f"  {'-> ' if c == sources[0][1] else '   '}{c}" for c in candidates),
+            "",
+            "That layout ships train and test as separate directories, each numbered "
+            "from 00000, so the index rule cannot tell them apart. Re-run with, e.g.:",
+            "",
+            "  --train-dir TrainIJCNN2013 --val-dir TestIJCNN2013",
+        ]
+    else:
+        lines += [
+            "",
+            "This looks like only part of GTSDB — the full benchmark is 900 images, "
+            "00000..00899. Point --gtsdb-root at a directory holding all of them, or "
+            "pass --train-dir / --val-dir to split by directory instead.",
+        ]
+    return "\n".join(lines)
+
+
+def prepare(
+    gtsdb_root: pathlib.Path,
+    out: pathlib.Path,
+    label_set: str,
+    train_dir: str | pathlib.Path | None = None,
+    val_dir: str | pathlib.Path | None = None,
+) -> dict:
     """Build ``<out>/gtsdb-<label_set>/`` and return a summary of what was written."""
     gtsdb_root, out = pathlib.Path(gtsdb_root), pathlib.Path(out)
     names, mapping = classes.label_set(label_set)
 
-    image_dir = find_gtsdb_dir(gtsdb_root)
-    annotations = parse_gt(image_dir / "gt.txt")
+    sources, candidates = _resolve_sources(gtsdb_root, train_dir, val_dir)
+    records = _collect_records(sources)
 
     cache_dir = out / "_images"
-    sizes, converted = _cache_images(image_dir, cache_dir)
+    sizes, converted = _cache_images(records, cache_dir)
 
     dataset_dir = out / f"gtsdb-{label_set}"
     labels_root = dataset_dir / "labels"
@@ -178,11 +294,10 @@ def prepare(gtsdb_root: pathlib.Path, out: pathlib.Path, label_set: str) -> dict
     histogram: collections.Counter[str] = collections.Counter()
     dropped = 0
 
-    for index in sorted(sizes):
-        split = split_for(index)
-        width, height = sizes[index]
+    for split, index, _, boxes in sorted(records, key=lambda r: (r[0], r[1])):
+        width, height = sizes[(split, index)]
         rows = []
-        for box in annotations.get(f"{index:05d}.ppm", []):
+        for box in boxes:
             converted_box = _to_yolo(box, width, height)
             if converted_box is None:
                 dropped += 1
@@ -198,13 +313,21 @@ def prepare(gtsdb_root: pathlib.Path, out: pathlib.Path, label_set: str) -> dict
 
         # An empty .txt is meaningful: ultralytics reads it as a background image.
         # Omitting these would inflate precision by never testing false positives.
-        (labels_root / split / f"{index:05d}.txt").write_text("\n".join(rows) + ("\n" if rows else ""))
+        (labels_root / split / f"{index:05d}.txt").write_text(
+            "\n".join(rows) + ("\n" if rows else "")
+        )
         stats[split]["images"] += 1
         stats[split]["boxes"] += len(rows)
         if not rows:
             stats[split]["negatives"] += 1
 
-    _link_images(dataset_dir, cache_dir, sorted(sizes))
+    empty = [split for split in SPLITS if stats[split]["images"] == 0]
+    if empty:
+        raise ValueError(
+            _empty_split_message(empty, records, sources, candidates, train_dir is not None)
+        )
+
+    _link_images(dataset_dir, cache_dir, records)
 
     data_yaml = dataset_dir / "data.yaml"
     data_yaml.write_text(
@@ -219,6 +342,7 @@ def prepare(gtsdb_root: pathlib.Path, out: pathlib.Path, label_set: str) -> dict
         "label_set": label_set,
         "dataset_dir": str(dataset_dir),
         "data_yaml": str(data_yaml),
+        "sources": [str(d) for _, d in sources],
         "splits": stats,
         "histogram": dict(histogram),
         "dropped": dropped,
@@ -228,6 +352,8 @@ def prepare(gtsdb_root: pathlib.Path, out: pathlib.Path, label_set: str) -> dict
 
 def _print_summary(summary: dict) -> None:
     print(f"\n  {summary['label_set']}  ->  {summary['dataset_dir']}")
+    for source in summary["sources"]:
+        print(f"  source: {source}")
     print(f"  PNGs encoded this run: {summary['converted']}  (rest served from cache)")
     for split, s in summary["splits"].items():
         print(
@@ -245,11 +371,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gtsdb-root", required=True, type=pathlib.Path,
                         help="dir containing gt.txt and *.ppm (searched recursively)")
     parser.add_argument("--label-set", default="4class", choices=classes.LABEL_SETS)
+    parser.add_argument("--train-dir", default=None,
+                        help="split by directory instead of filename index; give both "
+                             "--train-dir and --val-dir (relative to --gtsdb-root, or absolute). "
+                             "Needed when a dataset ships TrainIJCNN2013/ + TestIJCNN2013/.")
+    parser.add_argument("--val-dir", default=None, help="see --train-dir")
     parser.add_argument("--out", type=pathlib.Path,
                         default=pathlib.Path(__file__).resolve().parent / "datasets",
                         help="where to write the YOLO dataset(s)")
     args = parser.parse_args(argv)
-    _print_summary(prepare(args.gtsdb_root, args.out, args.label_set))
+    try:
+        summary = prepare(args.gtsdb_root, args.out, args.label_set,
+                          train_dir=args.train_dir, val_dir=args.val_dir)
+    except (ValueError, FileNotFoundError) as exc:
+        # These are dataset-layout problems, not crashes — a traceback just
+        # buries the explanation.
+        print(f"\nERROR: {exc}\n", file=sys.stderr)
+        return 2
+    _print_summary(summary)
     return 0
 
 

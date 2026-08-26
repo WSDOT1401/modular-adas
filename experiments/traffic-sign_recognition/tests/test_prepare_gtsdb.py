@@ -171,3 +171,113 @@ def test_ultralytics_actually_finds_the_labels(gtsdb_root, tmp_path):
         found[split] = sum(len(lbl["bboxes"]) for lbl in ds.labels)
     # fixture: train 00000/00002/00599 = 3 boxes (one degenerate dropped), val 00600 = 1
     assert found == {"train": 3, "val": 1}
+
+
+def test_empty_split_fails_loudly(tmp_path):
+    """An all-train dataset must fail at conversion, not 10 min into training.
+
+    Some GTSDB redistributions ship train and test as separate directories, each
+    with its own gt.txt and each numbered from 00000 — so the `index < 600` rule
+    puts everything in train. Left unchecked, ultralytics later dies on
+    "No images found in .../images/val", which says nothing about the real cause.
+    """
+    root = tmp_path / "train_only"
+    root.mkdir()
+    for idx in range(3):                          # every index < 600
+        _write_ppm(root / f"{idx:05d}.ppm", IMG_W, IMG_H)
+    (root / "gt.txt").write_text("00000.ppm;10;10;30;30;1\n")
+
+    with pytest.raises(ValueError) as excinfo:
+        prepare(root, tmp_path / "ds", "4class")
+    message = str(excinfo.value)
+    assert "val" in message                       # names the empty split
+    assert "00000" in message and "00002" in message   # shows the index range
+    assert "600" in message                       # explains the split rule
+
+
+def test_multiple_gt_txt_files_are_reported(tmp_path, capsys):
+    """Two gt.txt dirs means we silently used one — say so, don't hide it."""
+    root = tmp_path / "split_layout"
+    for sub, start in (("TrainIJCNN2013", 0), ("TestIJCNN2013", 600)):
+        d = root / sub
+        d.mkdir(parents=True)
+        for offset in range(2):
+            _write_ppm(d / f"{start + offset:05d}.ppm", IMG_W, IMG_H)
+        (d / "gt.txt").write_text(f"{start:05d}.ppm;10;10;30;30;1\n")
+
+    with pytest.raises(ValueError):        # only one dir is read -> a split is empty
+        prepare(root, tmp_path / "ds", "4class")
+    out = capsys.readouterr().out
+    assert "TrainIJCNN2013" in out and "TestIJCNN2013" in out, \
+        "both gt.txt directories must be named in the output"
+
+
+@pytest.fixture
+def split_layout_root(tmp_path):
+    """GTSDB shipped as TrainIJCNN2013/ + TestIJCNN2013/, both numbered from 0.
+
+    This is the layout that breaks the index rule: the test images restart at
+    00000, so `index < 600` calls all of them train.
+    """
+    root = tmp_path / "split_layout"
+    for sub, ids, cid in (("TrainIJCNN2013", (0, 1, 2), 1), ("TestIJCNN2013", (0, 1), 33)):
+        d = root / sub
+        d.mkdir(parents=True)
+        lines = []
+        for idx in ids:
+            _write_ppm(d / f"{idx:05d}.ppm", IMG_W, IMG_H)
+            lines.append(f"{idx:05d}.ppm;10;10;30;30;{cid}")
+        (d / "gt.txt").write_text("\n".join(lines) + "\n")
+    return root
+
+
+def test_explicit_dirs_split_by_directory_not_index(split_layout_root, tmp_path):
+    out = tmp_path / "ds"
+    summary = prepare(
+        split_layout_root, out, "4class",
+        train_dir="TrainIJCNN2013", val_dir="TestIJCNN2013",
+    )
+    assert summary["splits"]["train"]["images"] == 3
+    assert summary["splits"]["val"]["images"] == 2
+    # both dirs number from 00000 — they must not collide, and each keeps its class
+    assert _labels(out, "4class", "train", 0)[0][0] == "0"    # id 1  -> prohibitory
+    assert _labels(out, "4class", "val", 0)[0][0] == "2"      # id 33 -> mandatory
+
+
+def test_explicit_dirs_accept_absolute_paths(split_layout_root, tmp_path):
+    summary = prepare(
+        split_layout_root, tmp_path / "ds", "4class",
+        train_dir=split_layout_root / "TrainIJCNN2013",
+        val_dir=split_layout_root / "TestIJCNN2013",
+    )
+    assert summary["splits"]["val"]["images"] == 2
+
+
+def test_one_explicit_dir_without_the_other_is_rejected(split_layout_root, tmp_path):
+    with pytest.raises(ValueError, match="together"):
+        prepare(split_layout_root, tmp_path / "ds", "4class", train_dir="TrainIJCNN2013")
+
+
+def test_explicit_dir_without_gt_txt_is_a_clear_error(split_layout_root, tmp_path):
+    (split_layout_root / "Empty").mkdir()
+    with pytest.raises(FileNotFoundError, match="gt.txt"):
+        prepare(split_layout_root, tmp_path / "ds", "4class",
+                train_dir="TrainIJCNN2013", val_dir="Empty")
+
+
+def test_split_layout_survives_ultralytics(split_layout_root, tmp_path):
+    """The layout that caused the original bug must now load end-to-end."""
+    pytest.importorskip("ultralytics")
+    from ultralytics.data.dataset import YOLODataset
+    from ultralytics.data.utils import check_det_dataset
+
+    summary = prepare(split_layout_root, tmp_path / "ds", "4class",
+                      train_dir="TrainIJCNN2013", val_dir="TestIJCNN2013")
+    data = check_det_dataset(summary["data_yaml"])
+    found = {
+        split: sum(len(l["bboxes"]) for l in
+                   YOLODataset(img_path=str(data[split]), imgsz=640,
+                               data=data, augment=False).labels)
+        for split in ("train", "val")
+    }
+    assert found == {"train": 3, "val": 2}
