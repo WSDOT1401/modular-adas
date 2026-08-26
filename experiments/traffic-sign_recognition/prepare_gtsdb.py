@@ -46,6 +46,14 @@ import classes
 TRAIN_SPLIT_END = 600
 SPLITS = ("train", "val")
 
+# Suffixes ultralytics reads directly (subset of its IMG_FORMATS, 8.4.69). An
+# image already in one of these is reused as-is — the whole point of converting
+# is that ultralytics cannot read PPM, so re-encoding a PNG would be pure waste.
+READABLE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+# Everything we accept as a source image. Mirrors of GTSDB variously ship the
+# original .ppm or an already-converted .png/.jpg.
+SOURCE_SUFFIXES = READABLE_SUFFIXES | {".ppm", ".pgm", ".pnm"}
+
 
 def find_gtsdb_candidates(root: pathlib.Path) -> list[pathlib.Path]:
     """Every directory beneath ``root`` holding a ``gt.txt``, shallowest first.
@@ -62,10 +70,14 @@ def find_gtsdb_candidates(root: pathlib.Path) -> list[pathlib.Path]:
 
 
 def parse_gt(gt_path: pathlib.Path) -> dict[str, list[tuple[int, int, int, int, int]]]:
-    """Parse ``gt.txt`` into ``{filename: [(left, top, right, bottom, class_id)]}``.
+    """Parse ``gt.txt`` into ``{stem: [(left, top, right, bottom, class_id)]}``.
 
     Lines are ``filename;left;top;right;bottom;classId`` — semicolon separated,
     no header. Images with no sign simply do not appear.
+
+    Keyed by *stem*, not filename: mirrors that re-encode the images to PNG
+    usually leave ``gt.txt`` still naming ``.ppm``, so matching on the full
+    filename would silently find zero annotations.
     """
     boxes: dict[str, list[tuple[int, int, int, int, int]]] = collections.defaultdict(list)
     for lineno, raw in enumerate(gt_path.read_text().splitlines(), start=1):
@@ -76,7 +88,7 @@ def parse_gt(gt_path: pathlib.Path) -> dict[str, list[tuple[int, int, int, int, 
         if len(parts) != 6:
             raise ValueError(f"{gt_path}:{lineno}: expected 6 fields, got {len(parts)}: {line!r}")
         name, *nums = parts
-        boxes[name].append(tuple(int(n) for n in nums))  # type: ignore[arg-type]
+        boxes[pathlib.Path(name).stem].append(tuple(int(n) for n in nums))  # type: ignore[arg-type]
     return dict(boxes)
 
 
@@ -160,64 +172,89 @@ def _collect_records(
     records = []
     for split_override, image_dir in sources:
         annotations = parse_gt(image_dir / "gt.txt")
-        for ppm in sorted(image_dir.glob("*.ppm")):
+        images = sorted(
+            path for path in image_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES
+        )
+        for image in images:
             try:
-                index = int(ppm.stem)
+                index = int(image.stem)
             except ValueError:
-                print(f"  skipping non-numeric filename {ppm.name}", file=sys.stderr)
+                print(f"  skipping non-numeric filename {image.name}", file=sys.stderr)
                 continue
             split = split_override or split_for(index)
-            records.append((split, index, ppm, annotations.get(ppm.name, [])))
+            records.append((split, index, image, annotations.get(image.stem, [])))
     if not records:
+        searched = ", ".join(str(d) for _, d in sources)
+        found = sorted({
+            path.suffix.lower() or "(no extension)"
+            for _, d in sources for path in d.iterdir() if path.is_file()
+        })
         raise FileNotFoundError(
-            "no .ppm images found in " + ", ".join(str(d) for _, d in sources)
+            f"no usable images found in {searched}\n"
+            f"  file types present: {', '.join(found) or 'none'}\n"
+            f"  accepted: {', '.join(sorted(SOURCE_SUFFIXES))}\n"
+            "  If the images sit in a subdirectory next to gt.txt, point "
+            "--train-dir/--val-dir (or --gtsdb-root) at the directory holding them."
         )
     return records
 
 
-def _cache_images(records, cache_dir: pathlib.Path) -> tuple[dict[tuple[str, int], tuple[int, int]], int]:
-    """Decode each ``NNNNN.ppm`` to ``<cache>/<split>/NNNNN.png`` exactly once.
+def _cache_images(records, cache_dir: pathlib.Path):
+    """Materialise each source image under ``<cache>/<split>/`` exactly once.
 
-    Keyed by ``(split, index)`` because the explicit-directory mode can legally
-    have a train 00000 *and* a val 00000 — they live in different split dirs, so
-    they never collide, but the size map has to distinguish them.
+    Returns ``([(split, index, cached_path, width, height, boxes)], n_converted)``.
+
+    An image already in a format ultralytics reads is hardlinked, not re-encoded
+    — mirrors that ship PNG have done the work already. Only PPM (and friends)
+    get converted, to PNG rather than JPEG because some signs are 16 px across
+    and JPEG ringing on a 16 px box is a real cost.
 
     Pillow rather than cv2: ``Image.open`` reads only the header, so sizes are
-    free on re-runs and an already-converted image is never re-encoded.
+    free and an already-cached image is never touched twice.
     """
-    sizes: dict[tuple[str, int], tuple[int, int]] = {}
+    entries = []
     converted = 0
     for split in SPLITS:
         (cache_dir / split).mkdir(parents=True, exist_ok=True)
 
-    for split, index, ppm, _ in records:
-        png = cache_dir / split / f"{index:05d}.png"
-        with Image.open(ppm) as im:
-            sizes[(split, index)] = im.size
-            if not png.exists():
-                im.convert("RGB").save(png)
-                converted += 1
-    return sizes, converted
+    for split, index, source, boxes in records:
+        reusable = source.suffix.lower() in READABLE_SUFFIXES
+        suffix = source.suffix.lower() if reusable else ".png"
+        cached = cache_dir / split / f"{index:05d}{suffix}"
+
+        with Image.open(source) as im:
+            width, height = im.size          # header only
+            if not cached.exists():
+                if reusable:
+                    _place(source, cached)
+                else:
+                    im.convert("RGB").save(cached)
+                    converted += 1
+        entries.append((split, index, cached, width, height, boxes))
+    return entries, converted
 
 
-def _link_images(dataset_dir: pathlib.Path, cache_dir: pathlib.Path, records) -> None:
-    """Populate ``<dataset>/images/<split>/`` with hardlinks into the PNG cache.
+def _place(src: pathlib.Path, dst: pathlib.Path) -> None:
+    """Hardlink ``src`` to ``dst``, copying if the filesystem refuses."""
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def _link_images(dataset_dir: pathlib.Path, entries) -> None:
+    """Populate ``<dataset>/images/<split>/`` with hardlinks into the cache.
 
     Hardlinks rather than a symlinked directory on purpose — see the module
-    docstring. Falls back to copying if the filesystem refuses (e.g. the cache
-    and dataset land on different devices).
+    docstring.
     """
     for split in SPLITS:
         (dataset_dir / "images" / split).mkdir(parents=True, exist_ok=True)
-    for split, index, _, _ in records:
-        src = cache_dir / split / f"{index:05d}.png"
-        dst = dataset_dir / "images" / split / f"{index:05d}.png"
-        if dst.exists():
-            continue
-        try:
-            os.link(src, dst)
-        except OSError:
-            shutil.copy2(src, dst)
+    for split, _index, cached, _w, _h, _boxes in entries:
+        dst = dataset_dir / "images" / split / cached.name
+        if not dst.exists():
+            _place(cached, dst)
 
 
 def _empty_split_message(
@@ -229,7 +266,7 @@ def _empty_split_message(
     "No images found in .../images/val", which points at the symptom rather than
     the dataset layout that caused it.
     """
-    indices = sorted(index for _, index, _, _ in records)
+    indices = sorted(entry[1] for entry in records)
     lines = [
         f"GTSDB conversion produced an empty {'/'.join(empty)} split — stopping now, "
         "because training would otherwise fail later inside ultralytics with a "
@@ -281,7 +318,7 @@ def prepare(
     records = _collect_records(sources)
 
     cache_dir = out / "_images"
-    sizes, converted = _cache_images(records, cache_dir)
+    entries, converted = _cache_images(records, cache_dir)
 
     dataset_dir = out / f"gtsdb-{label_set}"
     labels_root = dataset_dir / "labels"
@@ -294,8 +331,7 @@ def prepare(
     histogram: collections.Counter[str] = collections.Counter()
     dropped = 0
 
-    for split, index, _, boxes in sorted(records, key=lambda r: (r[0], r[1])):
-        width, height = sizes[(split, index)]
+    for split, index, _cached, width, height, boxes in sorted(entries, key=lambda e: (e[0], e[1])):
         rows = []
         for box in boxes:
             converted_box = _to_yolo(box, width, height)
@@ -324,10 +360,10 @@ def prepare(
     empty = [split for split in SPLITS if stats[split]["images"] == 0]
     if empty:
         raise ValueError(
-            _empty_split_message(empty, records, sources, candidates, train_dir is not None)
+            _empty_split_message(empty, entries, sources, candidates, train_dir is not None)
         )
 
-    _link_images(dataset_dir, cache_dir, records)
+    _link_images(dataset_dir, entries)
 
     data_yaml = dataset_dir / "data.yaml"
     data_yaml.write_text(

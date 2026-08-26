@@ -130,7 +130,12 @@ is fine.
   directory. The converter refuses to emit an empty split, because ultralytics
   would otherwise fail much later with a "No images found" error that says
   nothing about the layout.
-- **PNG, not JPEG.** Some signs are 16 px across, where JPEG ringing is a real
+- **Image format is flexible.** Original `.ppm` gets re-encoded to PNG, because
+  `.ppm` is absent from ultralytics' `IMG_FORMATS`. A mirror that already ships
+  `.png`/`.jpg` is used **as-is** — hardlinked, never re-encoded. `gt.txt` is
+  matched by filename *stem*, since those mirrors typically leave it naming
+  `.ppm` files that no longer exist.
+- **PNG, not JPEG,** when converting. Some signs are 16 px across, where JPEG ringing is a real
   cost.
 - **Images are hardlinked, not symlinked.** `check_det_dataset` *resolves*
   symlinks, which reroutes the split path to the shared cache and sends

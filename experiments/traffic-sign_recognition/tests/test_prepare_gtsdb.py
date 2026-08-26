@@ -281,3 +281,72 @@ def test_split_layout_survives_ultralytics(split_layout_root, tmp_path):
         for split in ("train", "val")
     }
     assert found == {"train": 3, "val": 2}
+
+
+def _write_png(path: pathlib.Path, w: int, h: int) -> None:
+    from PIL import Image
+    Image.new("RGB", (w, h), (40, 90, 140)).save(path)
+
+
+def test_accepts_datasets_already_converted_to_png(tmp_path):
+    """Some GTSDB mirrors ship PNG/JPG instead of PPM, keeping gt.txt as-is.
+
+    The PPM->PNG step exists only because ultralytics cannot read PPM. If a
+    mirror already did it, use those files directly rather than refusing.
+    """
+    root = tmp_path / "png_mirror"
+    root.mkdir()
+    lines = []
+    for idx in (0, 1, 600):
+        _write_png(root / f"{idx:05d}.png", IMG_W, IMG_H)
+        # gt.txt still names .ppm even though the files are .png
+        lines.append(f"{idx:05d}.ppm;10;10;30;30;1")
+    (root / "gt.txt").write_text("\n".join(lines) + "\n")
+
+    out = tmp_path / "ds"
+    summary = prepare(root, out, "4class")
+    assert summary["splits"]["train"]["images"] == 2
+    assert summary["splits"]["val"]["images"] == 1
+    assert summary["converted"] == 0, "already-readable images must not be re-encoded"
+    # annotations matched by stem, so the .ppm/.png mismatch is harmless
+    assert _labels(out, "4class", "train", 0)[0][0] == "0"
+    assert _labels(out, "4class", "val", 600)[0][0] == "0"
+
+
+def test_accepts_jpg_and_keeps_the_extension(tmp_path):
+    root = tmp_path / "jpg_mirror"
+    root.mkdir()
+    for idx in (0, 600):
+        _write_png(root / f"{idx:05d}.jpg", IMG_W, IMG_H)
+    (root / "gt.txt").write_text("00000.ppm;10;10;30;30;11\n")
+
+    out = tmp_path / "ds"
+    prepare(root, out, "4class")
+    assert (out / "_images" / "train" / "00000.jpg").exists()
+    assert (out / "gtsdb-4class" / "images" / "train" / "00000.jpg").exists()
+    # no annotation for 00600 -> background negative, still needs its .txt
+    assert (out / "gtsdb-4class" / "labels" / "val" / "00600.txt").read_text().strip() == ""
+
+
+def test_png_mirror_survives_ultralytics(tmp_path):
+    pytest.importorskip("ultralytics")
+    from ultralytics.data.dataset import YOLODataset
+    from ultralytics.data.utils import check_det_dataset
+
+    root = tmp_path / "png_mirror"
+    root.mkdir()
+    lines = []
+    for idx in (0, 1, 600, 601):
+        _write_png(root / f"{idx:05d}.png", IMG_W, IMG_H)
+        lines.append(f"{idx:05d}.ppm;10;10;30;30;1")
+    (root / "gt.txt").write_text("\n".join(lines) + "\n")
+
+    summary = prepare(root, tmp_path / "ds", "4class")
+    data = check_det_dataset(summary["data_yaml"])
+    found = {
+        split: sum(len(l["bboxes"]) for l in
+                   YOLODataset(img_path=str(data[split]), imgsz=640,
+                               data=data, augment=False).labels)
+        for split in ("train", "val")
+    }
+    assert found == {"train": 2, "val": 2}
