@@ -55,18 +55,49 @@ READABLE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 SOURCE_SUFFIXES = READABLE_SUFFIXES | {".ppm", ".pgm", ".pnm"}
 
 
-def find_gtsdb_candidates(root: pathlib.Path) -> list[pathlib.Path]:
-    """Every directory beneath ``root`` holding a ``gt.txt``, shallowest first.
+def images_in(directory: pathlib.Path) -> list[pathlib.Path]:
+    """Usable source images directly inside ``directory`` (not recursive)."""
+    return sorted(
+        path for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES
+    )
 
-    A Kaggle Dataset may be uploaded flat, wrapped in ``FullIJCNN2013/``, or split
-    into ``TrainIJCNN2013/`` + ``TestIJCNN2013/`` — hence the search. Returns all
-    matches so the caller can say which one it used and which it ignored; picking
-    one silently is how a whole split goes missing.
+
+def image_dirs_under(root: pathlib.Path, limit: int = 12) -> list[str]:
+    """``"<dir>  (N images)"`` for every directory beneath ``root`` holding images.
+
+    Only used to make failures self-diagnosing: when no ``gt.txt`` directory has
+    images, this says where they actually are.
+    """
+    counts: collections.Counter[pathlib.Path] = collections.Counter()
+    for path in root.rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES:
+            counts[path.parent] += 1
+    return [f"{d}  ({n} images)" for d, n in sorted(counts.items())[:limit]]
+
+
+def find_gtsdb_candidates(root: pathlib.Path) -> list[pathlib.Path]:
+    """Directories beneath ``root`` holding a ``gt.txt``, best candidate first.
+
+    A Kaggle Dataset may be uploaded flat, wrapped in ``FullIJCNN2013/``, or
+    split into ``TrainIJCNN2013/`` + ``TestIJCNN2013/`` — hence the search.
+
+    **Directories that actually contain images sort first.** Mirrors commonly
+    keep a stray ``gt.txt`` at the dataset root while the images live a level
+    down with their own copy; taking the shallowest match lands on a directory
+    with no images in it at all. Ties break on depth, then path, so the flat and
+    wrapped layouts still resolve exactly as before.
+
+    Returns every match so the caller can report what it ignored — choosing
+    silently is how a whole split goes missing.
     """
     matches = sorted(root.rglob("gt.txt"), key=lambda p: (len(p.parts), str(p)))
     if not matches:
         raise FileNotFoundError(f"no gt.txt found anywhere under {root}")
-    return [m.parent for m in matches]
+    return sorted(
+        (m.parent for m in matches),
+        key=lambda d: (0 if images_in(d) else 1, len(d.parts), str(d)),
+    )
 
 
 def parse_gt(gt_path: pathlib.Path) -> dict[str, list[tuple[int, int, int, int, int]]]:
@@ -155,19 +186,24 @@ def _resolve_sources(
     chosen = candidates[0]
     if len(candidates) > 1:
         print(f"  NOTE: {len(candidates)} directories contain a gt.txt. Reading only:")
-        print(f"    -> {chosen}")
+        print(f"    -> {chosen}  ({len(images_in(chosen))} images)")
         for other in candidates[1:]:
-            print(f"       ignoring {other}")
+            print(f"       ignoring {other}  ({len(images_in(other))} images)")
     return [(None, chosen)], candidates
 
 
 def _collect_records(
-    sources: list[tuple[str | None, pathlib.Path]]
+    sources: list[tuple[str | None, pathlib.Path]], search_root: pathlib.Path
 ) -> list[tuple[str, int, pathlib.Path, list[tuple[int, int, int, int, int]]]]:
     """Flatten the sources into ``[(split, index, ppm_path, boxes)]``.
 
     Each source directory carries its own ``gt.txt``. Images absent from it keep
     an empty box list — they become background negatives, not dropped rows.
+
+    ``search_root`` is only used to make a failure self-diagnosing: if no source
+    directory has images, it is scanned to report where they actually are. It
+    must be the user-supplied root, never its parent, or the hint wanders off
+    into unrelated directories on the machine.
     """
     records = []
     for split_override, image_dir in sources:
@@ -190,13 +226,26 @@ def _collect_records(
             path.suffix.lower() or "(no extension)"
             for _, d in sources for path in d.iterdir() if path.is_file()
         })
-        raise FileNotFoundError(
-            f"no usable images found in {searched}\n"
-            f"  file types present: {', '.join(found) or 'none'}\n"
-            f"  accepted: {', '.join(sorted(SOURCE_SUFFIXES))}\n"
-            "  If the images sit in a subdirectory next to gt.txt, point "
-            "--train-dir/--val-dir (or --gtsdb-root) at the directory holding them."
-        )
+        elsewhere = image_dirs_under(search_root)
+        lines = [
+            f"no usable images found in {searched}",
+            f"  file types present: {', '.join(found) or 'none'}",
+            f"  accepted: {', '.join(sorted(SOURCE_SUFFIXES))}",
+        ]
+        if elsewhere:
+            lines += [
+                "",
+                "  Images ARE present elsewhere in this dataset:",
+                *(f"    {entry}" for entry in elsewhere),
+                "",
+                "  Point --gtsdb-root at the directory holding them (it needs a gt.txt "
+                "beside the images), or pass --train-dir/--val-dir.",
+            ]
+        else:
+            lines.append(
+                "  No images anywhere under this dataset — check the attached Dataset."
+            )
+        raise FileNotFoundError("\n".join(lines))
     return records
 
 
@@ -315,7 +364,7 @@ def prepare(
     names, mapping = classes.label_set(label_set)
 
     sources, candidates = _resolve_sources(gtsdb_root, train_dir, val_dir)
-    records = _collect_records(sources)
+    records = _collect_records(sources, gtsdb_root)
 
     cache_dir = out / "_images"
     entries, converted = _cache_images(records, cache_dir)

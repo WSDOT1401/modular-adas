@@ -350,3 +350,71 @@ def test_png_mirror_survives_ultralytics(tmp_path):
         for split in ("train", "val")
     }
     assert found == {"train": 2, "val": 2}
+
+
+def test_prefers_the_gt_txt_beside_the_images(tmp_path):
+    """A stray gt.txt at the dataset root must not win over the real one.
+
+    Mirrors often keep a top-level gt.txt (or readme) while the images sit in a
+    subdirectory with their own gt.txt. Picking the shallowest match finds a
+    directory containing no images at all.
+    """
+    root = tmp_path / "mirror"
+    root.mkdir()
+    (root / "gt.txt").write_text("00000.ppm;10;10;30;30;1\n")     # stray, no images here
+    (root / "ReadMe.txt").write_text("notes\n")
+
+    real = root / "FullIJCNN2013"
+    real.mkdir()
+    lines = []
+    for idx in (0, 1, 600):
+        _write_ppm(real / f"{idx:05d}.ppm", IMG_W, IMG_H)
+        lines.append(f"{idx:05d}.ppm;10;10;30;30;1")
+    (real / "gt.txt").write_text("\n".join(lines) + "\n")
+
+    summary = prepare(root, tmp_path / "ds", "4class")
+    assert summary["sources"] == [str(real)]
+    assert summary["splits"]["train"]["images"] == 2
+    assert summary["splits"]["val"]["images"] == 1
+
+
+def test_no_images_anywhere_names_the_dirs_that_do_have_them(tmp_path):
+    """If no gt.txt dir has images, say where the images actually are."""
+    root = tmp_path / "mirror"
+    root.mkdir()
+    (root / "gt.txt").write_text("00000.ppm;10;10;30;30;1\n")
+    pics = root / "Images" / "Train"
+    pics.mkdir(parents=True)
+    for idx in range(4):
+        _write_ppm(pics / f"{idx:05d}.ppm", IMG_W, IMG_H)
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        prepare(root, tmp_path / "ds", "4class")
+    message = str(excinfo.value)
+    assert "Images/Train" in message.replace("\\", "/"), message
+    assert "4 images" in message
+
+
+def test_image_dir_hint_never_escapes_the_dataset(tmp_path):
+    """The 'images are elsewhere' hint must scan --gtsdb-root, nothing above it.
+
+    A first cut walked up to the parent directory, so it happily listed
+    unrelated sibling folders on the machine.
+    """
+    sibling = tmp_path / "unrelated_project"
+    (sibling / "photos").mkdir(parents=True)
+    for idx in range(3):
+        _write_ppm(sibling / "photos" / f"{idx:05d}.ppm", IMG_W, IMG_H)
+
+    root = tmp_path / "mirror"
+    root.mkdir()
+    (root / "gt.txt").write_text("00000.ppm;10;10;30;30;1\n")
+    inside = root / "Images"
+    inside.mkdir()
+    _write_ppm(inside / "00000.ppm", IMG_W, IMG_H)
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        prepare(root, tmp_path / "ds", "4class")
+    message = str(excinfo.value)
+    assert "unrelated_project" not in message, message
+    assert "Images" in message
