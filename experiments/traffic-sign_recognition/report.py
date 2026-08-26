@@ -81,6 +81,33 @@ def _fmt(value, spec: str = ".4f") -> str:
     return "—" if value is None else format(value, spec)
 
 
+def _split_caveat(runs: list[dict]) -> list[str]:
+    """Describe the split these runs actually used.
+
+    Previously hardcoded to the official 600/300 claim, which silently became a
+    false statement about comparability the moment --split-at was used.
+    """
+    points = {r.get("dataset", {}).get("split_at") for r in runs}
+    official = all(r.get("dataset", {}).get("official_split") for r in runs) and points == {600}
+    if not points or points == {None}:
+        return ["- **Split unknown** — these runs predate split recording."]
+    shown = ", ".join(str(p) for p in sorted(points, key=lambda x: (x is None, x)))
+    if official:
+        return [
+            "- **`val` doubles as the test set.** The official IJCNN 2013 600/300 split,",
+            "  so mAP is comparable to published GTSDB results — but early stopping",
+            "  watches the same split it reports on, so these are mildly optimistic.",
+        ]
+    return [
+        f"- **NOT the official split** (`--split-at {shown}`), so these numbers are",
+        "  **not comparable to published GTSDB results**. GTSDB's original release",
+        "  withheld the test ground truth, so only the 600 train images are annotated;",
+        "  val is a contiguous tail carved out of them. Comparisons *within* this table",
+        "  remain valid. `val` also doubles as the test set, so early stopping watches",
+        "  the split it reports on and these are mildly optimistic.",
+    ]
+
+
 def write_comparison(runs: list[dict], out_md: pathlib.Path) -> None:
     out_md.parent.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -113,9 +140,7 @@ def write_comparison(runs: list[dict], out_md: pathlib.Path) -> None:
         "  different learning rates (see the `lr0 (peak)` column). The",
         "  640-vs-1024 comparison *within* a label set is controlled — same `nc`,",
         "  same LR, fixed `seed=0`.",
-        "- **`val` doubles as the test set.** We use the official IJCNN 2013 600/300",
-        "  split so mAP is comparable to published GTSDB results, but early stopping",
-        "  watches the same split it reports on, so these are mildly optimistic.",
+        *_split_caveat(runs),
         "- **`fliplr=0.0`.** Horizontal flip is disabled: a mirrored \"turn right\"",
         "  *is* \"turn left\", so ultralytics' 0.5 default would corrupt the",
         "  `mandatory` class.",

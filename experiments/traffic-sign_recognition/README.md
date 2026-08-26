@@ -71,6 +71,36 @@ $CONDA/python run_grid.py --datasets datasets
 $CONDA/python report.py --collect --manifest ../../models/manifests/gtsdb-yolo26n.yaml
 ```
 
+## Benchmark on the Raspberry Pi 5
+
+The training grid shows 1024 is clearly more accurate than 640; the Pi decides
+whether that is affordable. `benchmark_pi.py` times each run's PyTorch
+checkpoint and both NCNN exports at the resolution it was trained for, against
+the cluster's 18–25 FPS budget. Nothing is re-exported — you measure what would
+actually ship.
+
+```bash
+# on the Pi, in the repo
+git pull
+git lfs install && git lfs pull          # weights are LFS; without this you get text stubs
+pip install ultralytics ncnn
+
+cd experiments/traffic-sign_recognition
+python3 benchmark_pi.py --source /path/to/road_frame.png
+python3 benchmark_pi.py --runs 4class-640 4class-1024   # just the interesting pair
+```
+
+Writes `results/pi_benchmark.csv` with per-stage latency (preprocess /
+inference / postprocess), FPS, and SoC temperature before and after each
+config. `vcgencmd get_throttled` is reported when present — anything other than
+`0x0` means the numbers are thermally limited rather than representative, which
+matters because the Pi throttles under sustained inference as a slow FPS drift
+rather than an error.
+
+Prefer a real road frame over the synthetic fallback: inference cost is fixed
+for a given input size, but post-processing scales with detection count, so a
+blank frame under-reports NMS.
+
 ## Layout
 
 ```

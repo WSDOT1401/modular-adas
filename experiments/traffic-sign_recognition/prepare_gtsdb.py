@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import os
 import pathlib
 import shutil
@@ -459,9 +460,25 @@ def prepare(
         f"names: [{', '.join(names)}]\n"
     )
 
+    # Recorded beside the dataset so report.py can state the split that was
+    # actually used, instead of asserting the official one.
+    dataset_meta = dataset_dir / "dataset_meta.json"
+    dataset_meta.write_text(json.dumps({
+        "label_set": label_set,
+        "names": names,
+        "split_at": split_at,
+        "official_split": split_at == TRAIN_SPLIT_END,
+        "sources": [str(d) for _, d in sources],
+        "splits": stats,
+        "histogram": dict(histogram),
+        "dropped": dropped,
+    }, indent=2) + "\n")
+
     return {
         "label_set": label_set,
         "split_at": split_at,
+        "official_split": split_at == TRAIN_SPLIT_END,
+        "dataset_meta": str(dataset_meta),
         "dataset_dir": str(dataset_dir),
         "data_yaml": str(data_yaml),
         "sources": [str(d) for _, d in sources],

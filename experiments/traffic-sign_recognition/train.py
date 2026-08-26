@@ -28,9 +28,21 @@ EPOCHS = 100
 BATCH = 16
 PATIENCE = 30
 
-# NCNN precisions to export. Keys become the artifact suffix; both feed the
-# NCNN / NCNN-FP16 rows in experiments/object_detection/benchmark_yolo.py.
+# NCNN precisions to export. Both feed the NCNN / NCNN-FP16 rows in
+# experiments/object_detection/benchmark_yolo.py.
 NCNN_VARIANTS = {"fp32": {}, "fp16": {"half": True}}
+
+
+def ncnn_dir_name(tag: str) -> str:
+    """Export directory name for one precision.
+
+    The ``_ncnn_model`` suffix is mandatory, not cosmetic: ultralytics infers a
+    model's format by substring-matching the filename
+    (``AutoBackend._model_type``), so ``best_ncnn_fp32`` loads as *no* known
+    format and predict() dies with "not a supported model format". The precision
+    tag therefore goes in the middle.
+    """
+    return f"best_{tag}_ncnn_model"
 
 
 def _sha256(path: pathlib.Path) -> str:
@@ -55,7 +67,7 @@ def _export_ncnn(best: pathlib.Path, imgsz: int) -> dict[str, str]:
     for tag, kwargs in NCNN_VARIANTS.items():
         # fresh model per export: `half` mutates the loaded weights in place
         produced = pathlib.Path(YOLO(str(best)).export(format="ncnn", imgsz=imgsz, **kwargs))
-        dest = best.parent / f"best_ncnn_{tag}"
+        dest = best.parent / ncnn_dir_name(tag)
         if dest.exists():
             shutil.rmtree(dest)
         shutil.move(str(produced), str(dest))
@@ -78,6 +90,9 @@ def train_one(
     from ultralytics import YOLO
 
     names, _ = classes.label_set(label_set)
+    # Carried forward so the report can describe the split honestly.
+    meta_path = pathlib.Path(data_yaml).parent / "dataset_meta.json"
+    dataset_meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     project = pathlib.Path(project or HERE / "runs" / "detect")
     run_name = f"{label_set}-{imgsz}"
 
@@ -119,6 +134,7 @@ def train_one(
     summary = {
         "run": run_name,
         "label_set": label_set,
+        "dataset": dataset_meta,
         "names": names,
         "imgsz": imgsz,
         "epochs_requested": epochs,

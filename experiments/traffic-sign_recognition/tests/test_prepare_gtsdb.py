@@ -428,7 +428,7 @@ def _train_only_root(tmp_path, count=20):
     600-index split rule then puts everything in train.
     """
     root = tmp_path / "official"
-    root.mkdir()
+    root.mkdir(parents=True)
     lines = []
     for idx in range(count):
         _write_ppm(root / f"{idx:05d}.ppm", IMG_W, IMG_H)
@@ -507,3 +507,27 @@ def test_rerun_with_a_different_split_does_not_leak_across_splits(tmp_path):
     # labels must agree with images, or ultralytics silently reads background
     train_labels = {p.stem for p in (out / "gtsdb-4class" / "labels" / "train").iterdir()}
     assert train_labels == train
+
+
+def test_dataset_meta_records_the_split_actually_used(tmp_path):
+    """report.py must not claim the official split when a custom one was used.
+
+    The caveat in comparison.md was hardcoded, so a --split-at 480 run still
+    printed "official IJCNN 2013 600/300 split, comparable to published
+    results" — false, and exactly the kind of claim a reader trusts.
+    """
+    import json
+    root = _train_only_root(tmp_path, count=20)
+    out = tmp_path / "ds"
+    summary = prepare(root, out, "4class", split_at=16)
+
+    meta_path = pathlib.Path(summary["dataset_meta"])
+    assert meta_path.exists()
+    meta = json.loads(meta_path.read_text())
+    assert meta["split_at"] == 16
+    assert meta["official_split"] is False
+    assert meta["splits"]["val"]["images"] == 4
+
+    official = prepare(_train_only_root(tmp_path / "b", count=700), tmp_path / "ds2", "4class")
+    meta = json.loads(pathlib.Path(official["dataset_meta"]).read_text())
+    assert meta["split_at"] == 600 and meta["official_split"] is True
