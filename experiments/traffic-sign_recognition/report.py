@@ -108,8 +108,57 @@ def _split_caveat(runs: list[dict]) -> list[str]:
     ]
 
 
+# Raspberry Pi throttle bits from `vcgencmd get_throttled`. The low nibble is
+# "happening right now"; the 0x10000+ bits are "has happened since boot".
+THROTTLE_BITS = {
+    0: "under-voltage", 1: "ARM frequency capped", 2: "throttled",
+    3: "soft temperature limit",
+}
+
+
+def read_pi_benchmark(results_dir: pathlib.Path) -> tuple[dict[str, dict], set[str]]:
+    """Fastest measured variant per run, plus any throttle flags seen.
+
+    Only the fastest is folded into the comparison table — the table exists to
+    pick a model, and PyTorch is not a deployment candidate on the Pi. The full
+    per-variant breakdown stays in pi_benchmark.csv.
+    """
+    path = results_dir / "pi_benchmark.csv"
+    if not path.exists():
+        return {}, set()
+    with path.open(newline="") as handle:
+        rows = [r for r in csv.DictReader(handle) if r.get("status") == "ok"]
+    best: dict[str, dict] = {}
+    for row in rows:
+        run = row["run"]
+        if run not in best or float(row["total_ms"]) < float(best[run]["total_ms"]):
+            best[run] = row
+    return best, {r.get("throttled", "") for r in rows}
+
+
+def _throttle_note(flags: set[str]) -> list[str]:
+    """Warn when the Pi was power- or heat-limited during the benchmark."""
+    active = set()
+    for flag in flags:
+        try:
+            value = int(flag, 16)
+        except (TypeError, ValueError):
+            continue
+        active |= {name for bit, name in THROTTLE_BITS.items() if value >> bit & 1}
+    if not active:
+        return []
+    return [
+        f"- **The Pi was {' and '.join(sorted(active))} during the benchmark.** Those",
+        "  latency figures are a *floor*, not a measurement — the CPU was running below",
+        "  its rated clock. A Pi 5 needs a 5 V / 5 A (27 W) supply; under-voltage is",
+        "  usually an underpowered PSU rather than heat. Re-run once `vcgencmd",
+        "  get_throttled` reads `0x0`.",
+    ]
+
+
 def write_comparison(runs: list[dict], out_md: pathlib.Path) -> None:
     out_md.parent.mkdir(parents=True, exist_ok=True)
+    pi, throttle_flags = read_pi_benchmark(out_md.parent)
     lines = [
         "# GTSDB / YOLO26n — run comparison",
         "",
@@ -117,16 +166,21 @@ def write_comparison(runs: list[dict], out_md: pathlib.Path) -> None:
         "`weights/best.pt`, not the last epoch in `results.csv`.",
         "",
         "| run | imgsz | classes | epochs | mAP50 | mAP50-95 | precision | recall "
-        "| optimizer | lr0 (peak) | lr final | wall |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Pi ms | Pi FPS | Pi fmt | optimizer | lr0 (peak) | lr final | train wall |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in sorted(runs, key=lambda r: (r.get("label_set", ""), r.get("imgsz", 0))):
         wall = r.get("wall_seconds")
+        measured = pi.get(r.get("run", ""))
+        pi_ms = f"{float(measured['total_ms']):.1f}" if measured else "—"
+        pi_fps = f"{float(measured['fps']):.1f}" if measured else "—"
+        pi_fmt = measured["variant"] if measured else "—"
         lines.append(
             f"| `{r.get('run', '?')}` | {r.get('imgsz', '—')} | {len(r.get('names', [])) or '—'} "
             f"| {r.get('epochs_run', '—')}/{r.get('epochs_requested', '—')} "
             f"| {_fmt(r.get('map50'))} | {_fmt(r.get('map'))} "
             f"| {_fmt(r.get('precision'))} | {_fmt(r.get('recall'))} "
+            f"| {pi_ms} | {pi_fps} | {pi_fmt} "
             f"| {r.get('optimizer', '—')} | {_fmt(r.get('lr0_resolved'), '.6f')} "
             f"| {_fmt(r.get('lr_final'), '.8f')} "
             f"| {'—' if wall is None else f'{wall / 60:.1f} min'} |"
@@ -135,6 +189,16 @@ def write_comparison(runs: list[dict], out_md: pathlib.Path) -> None:
         "",
         "## Reading these numbers",
         "",
+        *([
+            "- **`Pi ms` / `Pi FPS` are the fastest measured variant** on a Raspberry Pi 5"
+            f" (`Pi fmt` names it), from `pi_benchmark.csv`. Latency is end-to-end:",
+            "  preprocess + inference + post-processing. The per-variant breakdown, including",
+            "  PyTorch, stays in that CSV.",
+        ] if pi else [
+            "- **No Pi benchmark found.** Run `benchmark_pi.py` on the Pi and copy",
+            "  `pi_benchmark.csv` into `results/` to fill the `Pi ms` / `Pi FPS` columns.",
+        ]),
+        *_throttle_note(throttle_flags),
         "- **Cross-label-set comparison is confounded.** `optimizer=\"auto\"` derives",
         "  `lr0 = 0.002 * 5 / (4 + nc)`, so the 4-class and 1-class runs train at",
         "  different learning rates (see the `lr0 (peak)` column). The",
