@@ -35,7 +35,10 @@
   </thead>
   <tbody>
   {% for v in videos %}
-    <tr class="state-{{ v.state }}" onclick="location.href='{{ url_for('video', name=v.name) }}'">
+    {# data-href, not onclick: url_for leaves an apostrophe in a filename raw,
+       Jinja escapes it to &#39;, and the browser decodes it back while parsing
+       the attribute -- which closes the JS string early and kills the click. #}
+    <tr class="state-{{ v.state }}" data-href="{{ url_for('video', name=v.name) }}">
       <td class="icon">
         {%- if v.state == 'done' %}<span class="tick" title="downloaded">&#10003;</span>
         {%- elif v.state == 'in_progress' %}<span class="half" title="in progress">&#9681;</span>
@@ -51,7 +54,7 @@
       <td class="num">{% if v.extracted %}{{ v.extracted }}
         <span class="muted small">@{{ v.interval_s }}s</span>{% else %}&mdash;{% endif %}</td>
       <td class="num"><strong>{{ v.selected or '' }}</strong>{% if not v.selected %}&mdash;{% endif %}</td>
-      <td class="muted small">{{ v.last_download[:16].replace('T', ' ') if v.last_download else '&mdash;' | safe }}</td>
+      <td class="muted small">{% if v.last_download %}{{ v.last_download[:16].replace('T', ' ') }}{% else %}&mdash;{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

@@ -23,7 +23,10 @@
 
 <form class="extract-form" method="post" action="{{ url_for('start_extract', name=name) }}">
   <label for="interval">split every</label>
-  <input id="interval" name="interval" type="number" step="0.5"
+  {# step="any": with a 0.1 minimum, any fixed step makes the useful round
+     numbers invalid -- step=0.5 accepts 0.1/0.6/1.1/1.6/2.1 but rejects 2.0,
+     and the browser then blocks submit with no visible error. #}
+  <input id="interval" name="interval" type="number" step="any" inputmode="decimal"
          min="{{ 0.1 }}" max="{{ 60 }}" value="{{ interval }}"> <span>seconds</span>
   <button type="submit" {% if job and job.status == 'running' %}disabled{% endif %}>
     {{ 'Re-extract' if frames else 'Extract frames' }}
@@ -32,7 +35,11 @@
     that the new interval does not produce</span>{% endif %}
 </form>
 
+{# data-poll is set only while a job is genuinely running. A finished job stays
+   in the server's dict for the life of the process, so polling unconditionally
+   makes the page see "done" and reload, forever. #}
 <div id="job" class="job {% if not job or job.status in ('done', 'idle') %}hidden{% endif %}"
+     {% if job and job.status == 'running' %}data-poll="1"{% endif %}
      data-status-url="{{ url_for('extract_status', name=name) }}">
   <div class="bar"><div id="job-fill" class="bar-fill"></div></div>
   <p id="job-text" class="muted small">starting…</p>

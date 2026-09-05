@@ -8,8 +8,24 @@
 (function () {
   "use strict";
 
+  wireRowLinks();
+
   var job = document.getElementById("job");
-  if (job) pollJob(job);
+  if (job && job.dataset.poll) pollJob(job);
+
+  /* Homepage rows navigate on click. Delegated so a filename containing a
+   * quote cannot break the handler, and so middle-click still opens a tab. */
+  function wireRowLinks() {
+    document.addEventListener("click", function (ev) {
+      var row = ev.target.closest ? ev.target.closest("tr[data-href]") : null;
+      if (!row) return;
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey) {
+        window.open(row.dataset.href, "_blank");
+      } else {
+        window.location.href = row.dataset.href;
+      }
+    });
+  }
 
   var toolbar = document.getElementById("toolbar");
   if (toolbar) wireGrid(toolbar);
