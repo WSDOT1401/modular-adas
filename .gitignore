@@ -90,3 +90,9 @@ experiments/traffic-sign_recognition/datasets/
 # results/ IS tracked, via Git LFS (see .gitattributes). The blanket *.pt rule
 # above would otherwise silently swallow the trained weights.
 !experiments/traffic-sign_recognition/results/**/*.pt
+gtsdb-dataset/
+# Frame-curation web app: raw footage and the regenerable frame cache. The
+# blanket *.mp4 / *.jpg rules above miss .mov/.mkv/.mts and workspace metadata.
+experiments/traffic-sign_recognition/dataset_builder/footage/*
+!experiments/traffic-sign_recognition/dataset_builder/footage/.gitkeep
+experiments/traffic-sign_recognition/dataset_builder/workspace/

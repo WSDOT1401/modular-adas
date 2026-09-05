@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+
+{% block content %}
+<h1 class="clip-title">{{ name }}</h1>
+<p class="muted small">
+  {{ meta.duration_s | clock }} &middot; {{ meta.width }}&times;{{ meta.height }}
+  &middot; {{ meta.fps }} fps &middot; {{ meta.frame_count }} frames
+  {%- if not meta.seekable %} &middot; <span class="warn">no reliable index &mdash; extraction will walk the file</span>{% endif %}
+</p>
+
+{% if downloads %}
+<details class="history" {% if not frames %}open{% endif %}>
+  <summary>{{ downloads | length }} download{{ '' if downloads|length == 1 else 's' }}
+    &middot; latest {{ downloads[0].at[:16].replace('T', ' ') }} ({{ downloads[0].count }} frames)</summary>
+  <ul>
+    {% for d in downloads %}
+    <li><time>{{ d.at[:19].replace('T', ' ') }}</time> &mdash; {{ d.count }} frames</li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
+<form class="extract-form" method="post" action="{{ url_for('start_extract', name=name) }}">
+  <label for="interval">split every</label>
+  <input id="interval" name="interval" type="number" step="0.5"
+         min="{{ 0.1 }}" max="{{ 60 }}" value="{{ interval }}"> <span>seconds</span>
+  <button type="submit" {% if job and job.status == 'running' %}disabled{% endif %}>
+    {{ 'Re-extract' if frames else 'Extract frames' }}
+  </button>
+  {% if frames %}<span class="muted small">re-extracting drops any selected frame
+    that the new interval does not produce</span>{% endif %}
+</form>
+
+<div id="job" class="job {% if not job or job.status in ('done', 'idle') %}hidden{% endif %}"
+     data-status-url="{{ url_for('extract_status', name=name) }}">
+  <div class="bar"><div id="job-fill" class="bar-fill"></div></div>
+  <p id="job-text" class="muted small">starting…</p>
+</div>
+
+{% if frames %}
+<div class="toolbar" id="toolbar"
+     data-save-url="{{ url_for('save_selection', name=name) }}"
+     data-selected='{{ selected | tojson }}'>
+  <div class="ruler" id="ruler"></div>
+  <div class="actions">
+    <button type="button" data-act="all">select all</button>
+    <button type="button" data-act="none">clear</button>
+    <button type="button" data-act="invert">invert</button>
+    <span class="count"><strong id="count">0</strong> selected</span>
+    <span id="saved" class="muted small"></span>
+    <a id="download" class="primary" href="{{ url_for('download_zip', name=name) }}">Download ZIP</a>
+  </div>
+  <p class="muted small hint">click to toggle &middot; shift-click for a range</p>
+</div>
+
+<div class="grid" id="grid">
+  {% for f in frames %}
+  <figure class="cell" data-frame="{{ f.frame }}" data-t="{{ f.t }}">
+    <img loading="lazy" width="320" src="{{ url_for('frame_image', name=name, kind='thumb', filename=f.file) }}" alt="">
+    <figcaption>{{ f.t | clock }}<span class="muted"> f{{ f.frame }}</span></figcaption>
+    <span class="badge">&#10003;</span>
+  </figure>
+  {% endfor %}
+</div>
+{% elif not job or job.status != 'running' %}
+<div class="empty"><p>No frames yet. Pick an interval above and extract.</p></div>
+{% endif %}
+{% endblock %}

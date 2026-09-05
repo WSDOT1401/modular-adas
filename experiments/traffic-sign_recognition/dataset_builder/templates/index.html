@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="progress-card">
+  <div class="progress-head">
+    <div>
+      <span class="big">{{ selected }}</span>
+      <span class="muted">/ {{ target }} frames selected</span>
+    </div>
+    <form method="post" action="{{ url_for('set_target') }}" class="target-form">
+      <label for="target">target</label>
+      <input id="target" name="target" type="number" min="1" step="10" value="{{ target }}">
+      <button type="submit">set</button>
+    </form>
+  </div>
+  <div class="bar"><div class="bar-fill" style="width: {{ pct }}%"></div></div>
+  <p class="muted small">
+    {{ downloaded }} frames in the latest download of each clip &middot;
+    {{ counts.done }} done, {{ counts.in_progress }} in progress,
+    {{ counts.untouched }} not started
+  </p>
+</section>
+
+{% if not videos %}
+<div class="empty">
+  <h2>No footage yet</h2>
+  <p>Drop dashcam videos into this folder, then reload:</p>
+  <code>{{ footage_dir }}</code>
+  <p class="muted small">mp4 &middot; mov &middot; avi &middot; mkv &middot; m4v &middot; mts &middot; ts &middot; webm</p>
+</div>
+{% else %}
+<table class="videos">
+  <thead>
+    <tr><th></th><th>video</th><th>length</th><th>size</th>
+        <th>frames</th><th>selected</th><th>last download</th></tr>
+  </thead>
+  <tbody>
+  {% for v in videos %}
+    <tr class="state-{{ v.state }}" onclick="location.href='{{ url_for('video', name=v.name) }}'">
+      <td class="icon">
+        {%- if v.state == 'done' %}<span class="tick" title="downloaded">&#10003;</span>
+        {%- elif v.state == 'in_progress' %}<span class="half" title="in progress">&#9681;</span>
+        {%- else %}<span class="cross" title="not started">&#10007;</span>{% endif -%}
+      </td>
+      <td class="name">{{ v.name }}{% if v.stale %}
+        <span class="warn" title="progress.json says extracted, but the frame cache is gone">cache missing</span>
+      {% endif %}{% if v.unreadable %}
+        <span class="warn" title="OpenCV cannot decode this file">unreadable</span>
+      {% endif %}</td>
+      <td class="num">{{ v.duration_s | clock }}</td>
+      <td class="num muted">{{ v.size_mb }} MB</td>
+      <td class="num">{% if v.extracted %}{{ v.extracted }}
+        <span class="muted small">@{{ v.interval_s }}s</span>{% else %}&mdash;{% endif %}</td>
+      <td class="num"><strong>{{ v.selected or '' }}</strong>{% if not v.selected %}&mdash;{% endif %}</td>
+      <td class="muted small">{{ v.last_download[:16].replace('T', ' ') if v.last_download else '&mdash;' | safe }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

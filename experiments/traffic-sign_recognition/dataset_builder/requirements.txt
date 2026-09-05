@@ -1,0 +1,7 @@
+# Frame-curation web app deps. Runs locally on your laptop, never on the Pi.
+#
+flask>=3.0            # routing + static/template serving + zip streaming
+opencv-python>=4.9    # video probe, seek, JPEG encode (already in w124-dash-env)
+#
+# No test deps: this tool is verified by using it. If that changes, pytest and
+# flask's test_client cover every route without a browser.
