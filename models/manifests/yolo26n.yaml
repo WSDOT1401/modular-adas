@@ -1,0 +1,22 @@
+# Model-weight manifest — metadata only. Raw weights (*.pt) are gitignored and
+# fetched on demand; this file records what to fetch and how to verify it.
+#
+# Verify a local copy:
+#   shasum -a 256 yolo26n.pt   # must equal the sha256 below
+
+model: yolo26n
+framework: ultralytics-yolo
+task: object-detection
+file: yolo26n.pt
+sha256: 9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef
+size_bytes: 5544453
+
+# Ultralytics auto-downloads this on first use: `YOLO("yolo26n.pt")`.
+# NOTE: the exact release-asset URL is unverified here — confirm it against the
+# Ultralytics release you pin, then fill it in. Do not commit the weights.
+source: ultralytics
+url: TODO   # e.g. https://github.com/ultralytics/assets/releases/download/<tag>/yolo26n.pt
+
+used_by:
+  - experiments/object_detection/   # benchmarking / prototyping
+  - services/vision/signs/          # (planned) traffic-sign detection

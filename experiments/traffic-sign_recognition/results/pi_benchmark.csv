@@ -1,0 +1,13 @@
+detections,fps,frame,imgsz,inference_ms,postprocess_ms,preprocess_ms,run,status,temp_after_c,temp_before_c,throttled,total_ms,variant
+2,1.8,german_dashcam_picture.png,1024,534.34,0.28,11.74,1class-1024,ok,50.1,41.4,0x50000,546.63,PyTorch
+2,3.3,german_dashcam_picture.png,1024,278.76,2.47,20.64,1class-1024,ok,46.3,49.0,0x50000,302.24,NCNN
+2,3.5,german_dashcam_picture.png,1024,265.64,1.88,18.8,1class-1024,ok,48.0,46.9,0x50005,286.64,NCNN-FP16
+2,5.0,german_dashcam_picture.png,640,193.56,0.28,4.53,1class-640,ok,51.2,46.9,0x50000,198.63,PyTorch
+2,9.8,german_dashcam_picture.png,640,92.72,1.66,7.71,1class-640,ok,49.0,49.0,0x50005,102.48,NCNN
+2,10.2,german_dashcam_picture.png,640,87.95,1.39,8.13,1class-640,ok,48.5,48.0,0x50000,97.87,NCNN-FP16
+2,1.7,german_dashcam_picture.png,1024,565.62,0.29,11.6,4class-1024,ok,53.5,48.0,0x50000,578.25,PyTorch
+2,3.3,german_dashcam_picture.png,1024,281.45,2.47,20.64,4class-1024,ok,50.1,50.7,0x50005,304.91,NCNN
+2,3.5,german_dashcam_picture.png,1024,264.34,1.84,19.14,4class-1024,ok,50.1,48.0,0x50005,285.66,NCNN-FP16
+2,4.8,german_dashcam_picture.png,640,201.51,0.28,4.47,4class-640,ok,52.4,48.5,0x50000,206.52,PyTorch
+2,9.8,german_dashcam_picture.png,640,92.46,2.02,7.52,4class-640,ok,51.2,51.2,0x50000,102.32,NCNN
+2,10.0,german_dashcam_picture.png,640,91.39,1.4,7.27,4class-640,ok,51.2,50.7,0x50005,100.37,NCNN-FP16

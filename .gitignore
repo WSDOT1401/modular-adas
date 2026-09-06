@@ -30,18 +30,18 @@ install_manifest.txt
 **/.rcc/
 
 # --- Qt deployment/runtime copied binaries & plugins ---
-qt_cluster/build-*/**/*.dll
-qt_cluster/build-*/generic/
-qt_cluster/build-*/iconengines/
-qt_cluster/build-*/imageformats/
-qt_cluster/build-*/networkinformation/
-qt_cluster/build-*/platforms/
-qt_cluster/build-*/qml/
-qt_cluster/build-*/qmltooling/
-qt_cluster/build-*/qmltypes/
-qt_cluster/build-*/tls/
-qt_cluster/build-*/translations/
-qt_cluster/build-*/W124Cluster/
+apps/cluster/build-*/**/*.dll
+apps/cluster/build-*/generic/
+apps/cluster/build-*/iconengines/
+apps/cluster/build-*/imageformats/
+apps/cluster/build-*/networkinformation/
+apps/cluster/build-*/platforms/
+apps/cluster/build-*/qml/
+apps/cluster/build-*/qmltooling/
+apps/cluster/build-*/qmltypes/
+apps/cluster/build-*/tls/
+apps/cluster/build-*/translations/
+apps/cluster/build-*/W124Cluster/
 
 # --- Node.js tooling (PNG generation scripts, etc.) ---
 node_modules/
@@ -58,4 +58,41 @@ list.txt
 # --- Python cache (pi helpers) ---
 __pycache__/
 *.py[cod]
-qt_cluster/state.json
+apps/cluster/state.json
+
+# --- AI assistant local guidance (not committed) ---
+CLAUDE.md
+
+# --- Python packaging (editable installs of libs/) ---
+*.egg-info/
+.eggs/
+
+# --- Vision sample media / replay clips (keep the dir, not the footage) ---
+services/vision/tests/fixtures/*
+!services/vision/tests/fixtures/.gitkeep
+
+# --- Runtime IPC files (generated; shared between producers and cluster) ---
+carplay_status.json
+trip_reset.flag
+
+# --- ML weights / sample media / inference outputs (experiments, models, vision) ---
+# Raw weights & media are never committed (see models/manifests/ for their metadata);
+# benchmark CSVs under experiments/ are tracked.
+*.pt
+*.jpg
+*.mp4
+runs/
+.env
+# --- Traffic-sign experiment (experiments/traffic-sign_recognition) ---
+# Generated YOLO datasets: the PNG cache and per-label-set labels. Fully
+# rebuildable from GTSDB with prepare_gtsdb.py, so not worth versioning.
+experiments/traffic-sign_recognition/datasets/
+# results/ IS tracked, via Git LFS (see .gitattributes). The blanket *.pt rule
+# above would otherwise silently swallow the trained weights.
+!experiments/traffic-sign_recognition/results/**/*.pt
+gtsdb-dataset/
+# Frame-curation web app: raw footage and the regenerable frame cache. The
+# blanket *.mp4 / *.jpg rules above miss .mov/.mkv/.mts and workspace metadata.
+experiments/traffic-sign_recognition/dataset_builder/footage/*
+!experiments/traffic-sign_recognition/dataset_builder/footage/.gitkeep
+experiments/traffic-sign_recognition/dataset_builder/workspace/

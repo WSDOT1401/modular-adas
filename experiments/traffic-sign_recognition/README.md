@@ -1,0 +1,182 @@
+# experiments/traffic-sign_recognition
+
+Train YOLO26n to detect traffic signs on **GTSDB** (German Traffic Sign
+Detection Benchmark), on a free Kaggle GPU.
+
+## Why this exists
+
+`services/vision/signs/` is still a set of `NotImplementedError` stubs, and we
+had no evidence about what sign-detection accuracy is even reachable inside the
+Pi's compute budget. This experiment builds the training pipeline and produces
+real numbers against a standard benchmark.
+
+**This is a baseline, not a shippable model.** GTSDB is German signage; the car
+drives on Thai roads. The *pipeline* is the deliverable, plus two findings:
+
+1. What does collapsing 43 classes into 4 super-classes buy over plain
+   "is there a sign here" detection?
+2. What does training at **640** — the resolution
+   `experiments/object_detection/benchmark_yolo.py` shows the Pi can run in real
+   time — cost in mAP versus **1024**?
+
+## The grid
+
+Four runs: `{4class, 1class} × {640, 1024}`, named `<label_set>-<imgsz>`.
+
+| label set | classes |
+|---|---|
+| `4class` | `prohibitory` · `danger` · `mandatory` · `other` (canonical GTSDB detection grouping) |
+| `1class` | `sign` — localisation only, and the front half of a detect-then-classify design |
+
+GTSDB has ~600 training images and 43 classes, several appearing fewer than ten
+times, so training all 43 would just produce a long tail of near-zero mAP.
+
+## Run it on Kaggle
+
+Prerequisites in the notebook editor:
+
+1. **Attach GTSDB** as a private Kaggle Dataset — it mounts read-only at
+   `/kaggle/input/<slug>/`. Upload once; never re-download per run.
+2. **Add a GitHub token** under Add-ons → Secrets, named `GITHUB_TOKEN`
+   (this repo is private, so the notebook has to authenticate to clone).
+3. **Internet: on** (needed for the clone, `pip`, and the PNNX binary the NCNN
+   export fetches) and **Accelerator: GPU**.
+
+Then open [`notebooks/kaggle_gtsdb.ipynb`](notebooks/kaggle_gtsdb.ipynb), set
+`GTSDB_ROOT` to your dataset's mount path, and run all. Roughly 60–90 min for
+the full grid.
+
+## Run it locally
+
+```bash
+CONDA=~/miniconda3/envs/w124-dash-env/bin
+
+# unit tests — no GPU, no dataset, no network
+$CONDA/python -m pytest tests -v
+
+# convert (both label sets share one PNG cache)
+$CONDA/python prepare_gtsdb.py --gtsdb-root /path/to/FullIJCNN2013 --label-set 4class
+$CONDA/python prepare_gtsdb.py --gtsdb-root /path/to/FullIJCNN2013 --label-set 1class
+
+# ...but if your copy ships train and test as separate directories, each with
+# its own gt.txt and each numbered from 00000, split by directory instead:
+$CONDA/python prepare_gtsdb.py --gtsdb-root /path/to/GTSDB --label-set 4class \
+    --train-dir TrainIJCNN2013 --val-dir TestIJCNN2013
+
+# one run, or the whole grid
+$CONDA/python train.py --data datasets/gtsdb-4class/data.yaml --label-set 4class --imgsz 640
+$CONDA/python run_grid.py --datasets datasets
+
+# comparison table + curated artifacts + weight manifest
+$CONDA/python report.py --collect --manifest ../../models/manifests/gtsdb-yolo26n.yaml
+```
+
+## Benchmark on the Raspberry Pi 5
+
+The training grid shows 1024 is clearly more accurate than 640; the Pi decides
+whether that is affordable. `benchmark_pi.py` times each run's PyTorch
+checkpoint and both NCNN exports at the resolution it was trained for, against
+the cluster's 18–25 FPS budget. Nothing is re-exported — you measure what would
+actually ship.
+
+```bash
+# on the Pi, in the repo
+git pull
+git lfs install && git lfs pull          # weights are LFS; without this you get text stubs
+pip install ultralytics ncnn
+
+cd experiments/traffic-sign_recognition
+python3 benchmark_pi.py --source /path/to/road_frame.png
+python3 benchmark_pi.py --runs 4class-640 4class-1024   # just the interesting pair
+```
+
+Writes `results/pi_benchmark.csv` with per-stage latency (preprocess /
+inference / postprocess), FPS, and SoC temperature before and after each
+config. `vcgencmd get_throttled` is reported when present — anything other than
+`0x0` means the numbers are thermally limited rather than representative, which
+matters because the Pi throttles under sustained inference as a slow FPS drift
+rather than an error.
+
+Prefer a real road frame over the synthetic fallback: inference cost is fixed
+for a given input size, but post-processing scales with detection count, so a
+blank frame under-reports NMS.
+
+## Layout
+
+```
+classes.py         43 GTSDB ids -> label sets. Single source of truth; this is
+                   what later seeds services/vision/signs/classes.py
+prepare_gtsdb.py   GTSDB (.ppm + gt.txt) -> YOLO dataset + data.yaml
+train.py           one run: train -> validate best.pt -> export NCNN
+run_grid.py        all four runs, sequential, one failure doesn't kill the rest
+report.py          run dirs -> results/comparison.md + curated artifacts + manifest
+tests/             converter and label-set tests (run locally)
+notebooks/         the Kaggle driver
+datasets/          generated, gitignored
+results/           committed — see below
+```
+
+## Results
+
+See [`results/comparison.md`](results/comparison.md), regenerated by `report.py`.
+
+Written to `/kaggle/temp` during a run: the ~1.1 GB PNG cache (900 images at
+~1.17 MB each). It is regenerable, so it stays out of the saved Kaggle output.
+
+Committed per run: `results.csv`, the plots, `args.yaml`, `run_meta.json`,
+`weights/best.pt`, and both NCNN exports (`fp32` + `fp16`) — about **20 MB per
+run, ~80 MB for the grid**. The `.pt`/`.png`/`.bin` files go through **Git LFS**
+(see the root `.gitattributes`); everything else is normal git. Weight sha256s
+are recorded in `models/manifests/gtsdb-yolo26n.yaml`.
+
+The NCNN artifacts feed the `NCNN` / `NCNN-FP16` rows in
+`experiments/object_detection/benchmark_yolo.py` directly — NCNN `param`/`bin`
+are architecture-portable, so exporting on Kaggle x86 and running on the Pi's ARM
+is fine.
+
+## Decisions worth knowing before you read the numbers
+
+- **`fliplr=0.0`.** Ultralytics defaults to a 0.5 horizontal flip. Mirroring a
+  traffic sign inverts its meaning — a flipped "turn right" *is* "turn left", and
+  mirrored numerals aren't real signs. Left at the default this quietly corrupts
+  the `mandatory` class.
+- **Only 600 of GTSDB's 900 images may be annotated.** The original competition
+  release withheld the test ground truth, so many mirrors ship
+  `TrainIJCNN2013/` with a `gt.txt` and `TestIJCNN2013Download/` without one.
+  There the default `--split-at 600` yields an empty val split (the converter
+  refuses and tells you); pass `--split-at 480` to take a contiguous 80/20 split
+  of the labelled images. Those numbers are then **not** comparable to published
+  GTSDB results, which use the official 600/300 split.
+- **Official IJCNN 2013 split** (`00000–00599` train, `00600–00899` val). GTSDB
+  frames come from continuous driving video, so a *random* split would put
+  near-duplicate consecutive frames on both sides and inflate mAP into
+  meaninglessness. Caveat: val doubles as test, so early stopping makes the
+  reported number mildly optimistic — standard for this benchmark.
+- **Background images are kept.** ~160 GTSDB images contain no sign; they get an
+  empty `.txt` so ultralytics reads them as negatives. Dropping them would
+  inflate precision by never testing false positives.
+- **`optimizer="auto"` retained,** which derives `lr0 = 0.002 * 5 / (4 + nc)` →
+  **0.00125** for `4class` and **0.002** for `1class`. So cross-label-set
+  comparison is confounded by an LR difference; 640-vs-1024 *within* a label set
+  is controlled (same `nc`, `seed=0`, `deterministic=True`). `report.py` records
+  the LR each run actually used so this can be pinned down later from evidence.
+- **Two dataset layouts are supported.** One directory of 900 images
+  (`00000–00899`) splits on the filename index. A copy that ships
+  `TrainIJCNN2013/` + `TestIJCNN2013/` numbers *both* from `00000`, so the index
+  rule cannot separate them — pass `--train-dir`/`--val-dir` and it splits by
+  directory. The converter refuses to emit an empty split, because ultralytics
+  would otherwise fail much later with a "No images found" error that says
+  nothing about the layout.
+- **Image format is flexible.** Original `.ppm` gets re-encoded to PNG, because
+  `.ppm` is absent from ultralytics' `IMG_FORMATS`. A mirror that already ships
+  `.png`/`.jpg` is used **as-is** — hardlinked, never re-encoded. `gt.txt` is
+  matched by filename *stem*, since those mirrors typically leave it naming
+  `.ppm` files that no longer exist.
+- **PNG, not JPEG,** when converting. Some signs are 16 px across, where JPEG ringing is a real
+  cost.
+- **Images are hardlinked, not symlinked.** `check_det_dataset` *resolves*
+  symlinks, which reroutes the split path to the shared cache and sends
+  `img2label_paths` looking for a `_labels/` that doesn't exist — every image
+  then loads as a background negative and training silently learns nothing.
+  `tests/test_prepare_gtsdb.py::test_ultralytics_actually_finds_the_labels`
+  guards this.

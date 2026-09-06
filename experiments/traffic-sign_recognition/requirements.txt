@@ -1,0 +1,12 @@
+# GTSDB traffic-sign training deps. Runs on a free Kaggle GPU — see notebooks/.
+#
+# Note this experiment does NOT need libs/protocol: it trains and evaluates a
+# model, it never publishes to the cluster. Wiring a trained model into
+# services/vision/signs/ is separate, later work.
+#
+ultralytics>=8.4.69      # pins the API this code was verified against
+Pillow>=10               # PPM decode -> PNG; header-only size reads
+PyYAML>=6                # reading args.yaml / data.yaml back in report.py
+#
+# Dev only — local unit tests, no GPU and no dataset download required:
+# pytest>=8
