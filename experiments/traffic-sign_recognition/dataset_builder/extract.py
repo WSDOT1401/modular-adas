@@ -20,7 +20,7 @@ import pathlib
 
 import cv2
 
-THUMB_WIDTH = 320
+THUMB_WIDTH = 768   # a 70px sign in a 2304px frame is 6px at 190px; see thumb_path
 FULL_QUALITY = 95   # source is already H.264-lossy; q95 adds nothing visible
 THUMB_QUALITY = 80
 MIN_INTERVAL_S = 0.1
@@ -145,6 +145,72 @@ def extract(video_path, out_dir, interval_s: float, on_progress=None) -> list[di
                      "meta": meta, "frames": frames}
     (out_dir / "frames.json").write_text(json.dumps(index_payload, indent=2) + "\n")
     return frames
+
+
+def thumb_path(out_dir, filename: str) -> pathlib.Path | None:
+    """The thumbnail for one frame, regenerated first if it is too small.
+
+    A traffic sign occupies roughly 70 px of a 2304 px-wide frame, so the grid
+    has to render cells several hundred pixels across before the sign is even
+    visible -- which makes a 320 px thumbnail an upscaled blur. Raising
+    ``THUMB_WIDTH`` would normally strand every cache extracted before the
+    change, and re-decoding the video to fix that is minutes of work for
+    something we already have on disk: the full-resolution JPEG sitting next to
+    it. So a stale thumbnail is rebuilt from its own full frame, on demand, the
+    first time the browser asks for it. About 30 ms each, spread across lazy
+    loading, and it never happens twice.
+    """
+    out_dir = pathlib.Path(out_dir)
+    thumb, full = out_dir / "thumb" / filename, out_dir / "full" / filename
+    if not thumb.exists():
+        return thumb if not full.exists() else _rebuild_thumb(full, thumb)
+    if not full.exists():
+        return thumb            # nothing to rebuild from; serve what we have
+    width = _jpeg_width(thumb)
+    if width is None or width >= THUMB_WIDTH:
+        return thumb
+    return _rebuild_thumb(full, thumb)
+
+
+def _jpeg_width(path: pathlib.Path) -> int | None:
+    """Width from the JPEG header, without decoding the image.
+
+    This runs for every thumbnail the browser asks for, and a 600-frame clip
+    asks 600 times. Decoding each one just to read a number would burn seconds
+    per page view forever, so we walk the segment markers to the start-of-frame
+    header and read the two bytes that matter.
+    """
+    try:
+        with path.open("rb") as handle:
+            if handle.read(2) != b"\xff\xd8":
+                return None                     # not a JPEG
+            while True:
+                marker = handle.read(2)
+                if len(marker) < 2 or marker[0] != 0xFF:
+                    return None
+                # SOF0..SOF15, skipping the four that are not frame headers.
+                if 0xC0 <= marker[1] <= 0xCF and marker[1] not in (0xC4, 0xC8, 0xCC):
+                    handle.read(3)              # segment length + sample precision
+                    header = handle.read(4)     # height then width, big-endian
+                    return int.from_bytes(header[2:4], "big") if len(header) == 4 else None
+                length = int.from_bytes(handle.read(2), "big")
+                if length < 2:
+                    return None
+                handle.seek(length - 2, 1)
+    except OSError:
+        return None
+
+
+def _rebuild_thumb(full: pathlib.Path, thumb: pathlib.Path) -> pathlib.Path:
+    frame = cv2.imread(str(full))
+    if frame is None:
+        return thumb            # unreadable full frame; let the route 404 honestly
+    thumb.parent.mkdir(parents=True, exist_ok=True)
+    height, width = frame.shape[:2]
+    small = cv2.resize(frame, (THUMB_WIDTH, max(1, round(THUMB_WIDTH * height / width))),
+                       interpolation=cv2.INTER_AREA)
+    cv2.imwrite(str(thumb), small, [cv2.IMWRITE_JPEG_QUALITY, THUMB_QUALITY])
+    return thumb
 
 
 def load_index(out_dir) -> dict | None:

@@ -42,8 +42,9 @@ footage/*.MP4
    │                  runs off-thread with a progress bar; a 20-minute
    │                  clip does not freeze the tab
    │
-   ├─ grid           click to toggle · shift-click for a range · time ruler
-   │                  to jump · every click autosaves
+   ├─ contact sheet  click to pick · shift-click for a range · S/M/L sizes ·
+   │                  enter or the corner button opens a frame at full
+   │                  resolution · time ruler to jump · every click autosaves
    │
    └─ Download ZIP →  ~/Downloads  →  upload to your labelling tool
 ```
@@ -90,16 +91,28 @@ extract.py      cv2 sampling — seek-based, records the frame it LANDED on
 catalog.py      scans footage/, joins with progress, validates URL names
 export.py       zip + manifest
 progress.py     progress.json read/write, atomic
-progress.json   TRACKED IN GIT — the lab notebook
+progress.json   the lab notebook (intended to be committed; run `git add` it)
 footage/        your videos (gitignored)
 workspace/      frame cache (gitignored, safe to delete, ~13 s to rebuild)
 ```
 
-`progress.json` is tracked on purpose: it records which frames you curated out of
-which footage, which is real dataset provenance, and `git log` becomes its
-history. It is the only file here worth backing up.
+`progress.json` is meant to be tracked: it records which frames you curated out
+of which footage, which is real dataset provenance, and `git log` becomes its
+history. It is the only file here worth backing up. It is **not committed yet** —
+it is not gitignored either, so `git add` it once you have curated something real.
 
 ## Notes
+
+**Frame size.** A Thai overhead sign is about 70 px of a 2304 px-wide frame, so
+a small thumbnail cannot answer "is there a sign here" at all: at the old 190 px
+cell that sign rendered 6 px across. The sheet now defaults to 440 px cells with
+S/M/L on the toolbar (remembered per browser), and any frame opens at full
+source resolution with `enter` or the corner button. Arrow keys move, `space`
+picks, `esc` returns to the sheet.
+
+Thumbnails are 768 px wide to match. A cache extracted before that change is
+upgraded in place, from the full-resolution JPEG already sitting next to it, the
+first time the browser asks for each one. No re-extract, about 30 ms per frame.
 
 **Interval.** Default 2 s. At 60 km/h that's ~33 m of road between frames — far
 enough apart to be genuinely different images. Stopped at a red light they will

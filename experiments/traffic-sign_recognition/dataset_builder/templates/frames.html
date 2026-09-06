@@ -1,39 +1,42 @@
 {% extends "base.html" %}
 {% block title %}{{ name }}{% endblock %}
+{% block main_class %}wide{% endblock %}
 
 {% block content %}
-<h1 class="clip-title">{{ name }}</h1>
-<p class="muted small">
-  {{ meta.duration_s | clock }} &middot; {{ meta.width }}&times;{{ meta.height }}
-  &middot; {{ meta.fps }} fps &middot; {{ meta.frame_count }} frames
-  {%- if not meta.seekable %} &middot; <span class="warn">no reliable index &mdash; extraction will walk the file</span>{% endif %}
-</p>
+{# The clip's identity and facts belong on one line. Every row spent here is a
+   row of frames pushed below the fold, and the frames are the point. #}
+<div class="clip-head">
+  <h1 class="clip-title">{{ name }}</h1>
+  <p class="muted small nums">
+    {{ meta.duration_s | clock }} &middot; {{ meta.width }}&times;{{ meta.height }}
+    &middot; {{ meta.fps }} fps &middot; {{ meta.frame_count }} frames
+    {%- if not meta.seekable %} &middot; <span class="warn">no reliable index, extraction will walk the file</span>{% endif %}
+    {%- if downloads %} &middot; <span class="ok-text">downloaded {{ downloads[0].at[:16].replace('T', ' ') }}
+      ({{ downloads[0].count }} frames){% if downloads | length > 1 %}, {{ downloads | length }} times{% endif %}</span>{% endif %}
+  </p>
+</div>
 
-{% if downloads %}
-<details class="history" {% if not frames %}open{% endif %}>
-  <summary>{{ downloads | length }} download{{ '' if downloads|length == 1 else 's' }}
-    &middot; latest {{ downloads[0].at[:16].replace('T', ' ') }} ({{ downloads[0].count }} frames)</summary>
-  <ul>
-    {% for d in downloads %}
-    <li><time>{{ d.at[:19].replace('T', ' ') }}</time> &mdash; {{ d.count }} frames</li>
-    {% endfor %}
-  </ul>
-</details>
-{% endif %}
-
-<form class="extract-form" method="post" action="{{ url_for('start_extract', name=name) }}">
-  <label for="interval">split every</label>
+{# Setting the interval is a once-per-clip act. Prominent while there is nothing
+   to look at, folded away into the toolbar the moment there is. #}
+{% macro extract_form(compact) %}
+<form class="extract-form{% if compact %} compact{% endif %}" method="post"
+      action="{{ url_for('start_extract', name=name) }}">
+  <label for="interval{{ '-c' if compact }}">split every</label>
   {# step="any": with a 0.1 minimum, any fixed step makes the useful round
      numbers invalid -- step=0.5 accepts 0.1/0.6/1.1/1.6/2.1 but rejects 2.0,
      and the browser then blocks submit with no visible error. #}
-  <input id="interval" name="interval" type="number" step="any" inputmode="decimal"
-         min="{{ 0.1 }}" max="{{ 60 }}" value="{{ interval }}"> <span>seconds</span>
+  <input id="interval{{ '-c' if compact }}" name="interval" type="number" step="any"
+         inputmode="decimal" min="{{ 0.1 }}" max="{{ 60 }}" value="{{ interval }}">
+  <span>seconds</span>
   <button type="submit" {% if job and job.status == 'running' %}disabled{% endif %}>
-    {{ 'Re-extract' if frames else 'Extract frames' }}
+    {{ 'Re-extract' if compact else 'Extract frames' }}
   </button>
-  {% if frames %}<span class="muted small">re-extracting drops any selected frame
-    that the new interval does not produce</span>{% endif %}
+  {% if compact %}<span class="muted small">drops any selected frame the new interval
+    does not produce</span>{% endif %}
 </form>
+{% endmacro %}
+
+{% if not frames %}{{ extract_form(false) }}{% endif %}
 
 {# data-poll is set only while a job is genuinely running. A finished job stays
    in the server's dict for the life of the process, so polling unconditionally
@@ -49,26 +52,86 @@
 <div class="toolbar" id="toolbar"
      data-save-url="{{ url_for('save_selection', name=name) }}"
      data-selected='{{ selected | tojson }}'>
-  <div class="ruler" id="ruler"></div>
+  <div class="ruler" id="ruler" role="group" aria-label="Jump to a time in the clip"></div>
   <div class="actions">
+    {# Three steps, not a slider: what matters is whether a sign is visible,
+       and that is a threshold rather than a continuum. #}
+    <div class="sizer">
+      <span class="muted small">size</span>
+      <div class="seg" id="sizer" role="group" aria-label="Frame size">
+        <button type="button" data-size="320" aria-pressed="false">S</button>
+        <button type="button" data-size="440" aria-pressed="false">M</button>
+        <button type="button" data-size="640" aria-pressed="false">L</button>
+      </div>
+    </div>
+    <span class="rule" aria-hidden="true"></span>
     <button type="button" data-act="all">select all</button>
     <button type="button" data-act="none">clear</button>
     <button type="button" data-act="invert">invert</button>
-    <span class="count"><strong id="count">0</strong> selected</span>
-    <span id="saved" class="muted small"></span>
-    <a id="download" class="primary" href="{{ url_for('download_zip', name=name) }}">Download ZIP</a>
+    <span class="rule" aria-hidden="true"></span>
+    <details class="respan">
+      <summary class="nums">{{ frames | length }} frames @ {{ interval }}s</summary>
+      <div class="respan-body">
+        {{ extract_form(true) }}
+        {% if downloads %}
+        <ul class="dl-list muted small">
+          {% for d in downloads %}
+          <li><time class="nums">{{ d.at[:19].replace('T', ' ') }}</time> &middot; {{ d.count }} frames</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </details>
+    <span class="count spacer"><strong id="count">0</strong> selected</span>
+    <span id="saved" class="muted small" role="status"></span>
+    <a id="download" class="btn primary" href="{{ url_for('download_zip', name=name) }}">Download ZIP</a>
   </div>
-  <p class="muted small hint">click to toggle &middot; shift-click for a range</p>
+  <p class="muted small hint">
+    <kbd>shift</kbd>-click picks a range &middot; <kbd>enter</kbd> or the corner
+    button opens a frame at full resolution
+  </p>
 </div>
 
-<div class="grid" id="grid">
-  {% for f in frames %}
-  <figure class="cell" data-frame="{{ f.frame }}" data-t="{{ f.t }}">
-    <img loading="lazy" width="320" src="{{ url_for('frame_image', name=name, kind='thumb', filename=f.file) }}" alt="">
-    <figcaption>{{ f.t | clock }}<span class="muted"> f{{ f.frame }}</span></figcaption>
-    <span class="badge">&#10003;</span>
-  </figure>
-  {% endfor %}
+{# One aspect ratio for the whole sheet: every frame comes from the same camera,
+   and reserving the box up front stops 600 lazy images shifting the page under
+   the cursor as they arrive. #}
+<div class="well">
+  <div class="grid" id="grid"
+       style="--ar: {{ meta.width or 16 }} / {{ meta.height or 9 }}">
+    {% for f in frames %}
+    <figure class="cell" data-frame="{{ f.frame }}" data-t="{{ f.t }}"
+            data-full="{{ url_for('frame_image', name=name, kind='full', filename=f.file) }}">
+      <img loading="lazy" decoding="async"
+           src="{{ url_for('frame_image', name=name, kind='thumb', filename=f.file) }}" alt="">
+      <button type="button" class="pick" aria-pressed="false"
+              aria-label="Pick frame {{ f.frame }} at {{ f.t | clock }}"></button>
+      <figcaption class="stamp">{{ f.t | clock }}<span class="fno">f{{ f.frame }}</span></figcaption>
+      <span class="badge" aria-hidden="true">&#10003;</span>
+      <button type="button" class="zoom"
+              aria-label="Enlarge frame {{ f.frame }} at {{ f.t | clock }}">&#9974; full size</button>
+    </figure>
+    {% endfor %}
+  </div>
+</div>
+
+{# Built once and reused; the image src is swapped as you move through frames. #}
+<div class="viewer hidden" id="viewer" role="dialog" aria-modal="true"
+     aria-label="Frame at full resolution">
+  <div class="viewer-bar">
+    <strong id="v-time" class="nums">00:00</strong>
+    <span id="v-frame" class="muted small nums"></span>
+    <span class="where"><span id="v-pos">1</span> / {{ frames | length }}</span>
+    <span class="spacer"></span>
+    <button type="button" id="v-prev" aria-label="Previous frame">&larr;</button>
+    <button type="button" id="v-next" aria-label="Next frame">&rarr;</button>
+    <button type="button" id="v-pick" aria-pressed="false">Pick</button>
+    <button type="button" id="v-close" aria-label="Close full size view">Close</button>
+  </div>
+  <div class="viewer-stage" id="v-stage"><img id="v-img" alt=""></div>
+  <p class="viewer-foot">
+    <kbd>&larr;</kbd> <kbd>&rarr;</kbd> move &middot; <kbd>space</kbd> or a click
+    on the frame picks it &middot; <kbd>esc</kbd> back to the sheet
+  </p>
 </div>
 {% elif not job or job.status != 'running' %}
 <div class="empty"><p>No frames yet. Pick an interval above and extract.</p></div>

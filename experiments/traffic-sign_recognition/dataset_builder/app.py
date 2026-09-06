@@ -259,8 +259,17 @@ def download_zip(name: str):
 def frame_image(name: str, kind: str, filename: str):
     _video_or_404(name)
     _, workspace_dir, _ = _paths()
-    return send_from_directory(catalog.workspace_for(workspace_dir, name) / kind,
-                               filename, max_age=3600)
+    out_dir = catalog.workspace_for(workspace_dir, name)
+    # filename comes from the URL. send_from_directory would reject a traversal
+    # on its own, but extract.thumb_path joins the name first, so check here.
+    if "/" in filename or "\\" in filename or filename in ("", ".", ".."):
+        abort(404)
+    if kind == "thumb":
+        # Caches extracted before THUMB_WIDTH rose hold 320px thumbnails, which
+        # the grid would upscale into a blur. Rebuilt once, from the full frame
+        # already on disk, the first time the browser asks.
+        extract.thumb_path(out_dir, filename)
+    return send_from_directory(out_dir / kind, filename, max_age=3600)
 
 
 def main() -> None:
