@@ -107,11 +107,22 @@ with zipfile.ZipFile(zip_path) as zf:
     zf.extractall(DATA)
 
 # The zip may or may not carry a top-level YOLO/ directory; find it either way.
-source = next(p.parent for p in pathlib.Path(DATA).rglob("images/train") if p.is_dir())
+# Require BOTH images/train and labels/train under the same parent, so a
+# half-matching layout fails here with something readable instead of later.
+candidates = [d.parent.parent for d in pathlib.Path(DATA).rglob("images/train")
+              if d.is_dir() and (d.parent.parent / "labels/train").is_dir()]
+if not candidates:
+    found = sorted({str(d.relative_to(DATA)) for d in pathlib.Path(DATA).rglob("*") if d.is_dir()})[:15]
+    raise SystemExit(
+        "no images/train + labels/train pair found under the unzipped dataset.\n"
+        f"directories present: {found}\n"
+        "Re-zip from the datasets/ dir:  zip -rq ~/thai_yolo.zip YOLO -x '.*' '*/.*'"
+    )
+source = candidates[0]
 n_img = len(list((source / "images/train").glob("*.jpg")))
 n_lbl = len(list((source / "labels/train").glob("*.txt")))
 print(f"source: {source}\n  {n_img} images, {n_lbl} labels")
-assert n_img == n_lbl > 0, "image/label count mismatch — re-zip the dataset"
+assert n_img == n_lbl > 0, f"expected equal nonzero counts, got {n_img} images / {n_lbl} labels"
 ''')
 
 md(r"""
