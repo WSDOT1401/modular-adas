@@ -96,3 +96,4 @@ gtsdb-dataset/
 experiments/traffic-sign_recognition/dataset_builder/footage/*
 !experiments/traffic-sign_recognition/dataset_builder/footage/.gitkeep
 experiments/traffic-sign_recognition/dataset_builder/workspace/
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/datasets
