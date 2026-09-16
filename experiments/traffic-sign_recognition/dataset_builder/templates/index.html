@@ -20,7 +20,7 @@
   </p>
 </section>
 
-{% if not videos %}
+{% if not tabs.active and not tabs.archived %}
 <div class="empty">
   <h2>No footage yet</h2>
   <p>Drop dashcam videos into this folder, then reload:</p>
@@ -28,9 +28,28 @@
   <p class="muted small">mp4 &middot; mov &middot; avi &middot; mkv &middot; m4v &middot; mts &middot; ts &middot; webm</p>
 </div>
 {% else %}
+{# Plain links, so an archived list is a URL you can bookmark or reload. #}
+<nav class="tabs">
+  <a href="{{ url_for('index') }}"{% if not archived_tab %} class="on" aria-current="page"{% endif %}>
+    Active <span class="count">{{ tabs.active }}</span></a>
+  <a href="{{ url_for('index', tab='archived') }}"{% if archived_tab %} class="on" aria-current="page"{% endif %}>
+    Archived <span class="count">{{ tabs.archived }}</span></a>
+</nav>
+
+{% if not videos %}
+<p class="muted empty-tab">{% if archived_tab %}Nothing archived yet. Tick clips on
+  Active and press Archive to park them here.{% else %}Every clip is archived.{% endif %}</p>
+{% else %}
+{# A plain form, so ticking boxes and submitting works with JS off too. The
+   script only hides the buttons until something is ticked and asks to confirm.
+   Action is the harmless one; Trash overrides it with formaction. #}
+<form method="post" action="{{ url_for('archive_videos') }}" id="bulk">
+<input type="hidden" name="tab" value="{{ 'archived' if archived_tab else '' }}">
 <table class="videos">
   <thead>
-    <tr><th></th><th>video</th><th>length</th><th>size</th>
+    <tr><th class="pickcol"><input type="checkbox" id="pickall"
+          aria-label="Select every clip on this tab"></th>
+        <th></th><th>video</th><th>length</th><th>size</th>
         <th>frames</th><th>selected</th><th>last download</th></tr>
   </thead>
   <tbody>
@@ -39,6 +58,8 @@
        Jinja escapes it to &#39;, and the browser decodes it back while parsing
        the attribute -- which closes the JS string early and kills the click. #}
     <tr class="state-{{ v.state }}" data-href="{{ url_for('video', name=v.name) }}">
+      <td class="pickcol"><input type="checkbox" name="name" value="{{ v.name }}"
+        aria-label="Select {{ v.name }}"></td>
       <td class="icon">
         {%- if v.state == 'done' %}<span class="tick" title="downloaded">&#10003;</span>
         {%- elif v.state == 'in_progress' %}<span class="half" title="in progress">&#9681;</span>
@@ -59,5 +80,15 @@
   {% endfor %}
   </tbody>
 </table>
+<div class="bulk-bar hidden" id="bulk-bar">
+  <span id="bulk-count" class="muted small"></span>
+  <button type="submit">{{ 'Restore' if archived_tab else 'Archive' }}</button>
+  <button type="submit" class="primary"
+    formaction="{{ url_for('download_many') }}">Download ZIP</button>
+  <button type="submit" class="danger"
+    formaction="{{ url_for('delete_videos') }}">Move to Trash</button>
+</div>
+</form>
+{% endif %}
 {% endif %}
 {% endblock %}

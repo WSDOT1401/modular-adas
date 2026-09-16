@@ -27,18 +27,65 @@
   var toolbar = document.getElementById("toolbar");
   if (toolbar) wireGrid(toolbar);
 
+  var bulk = document.getElementById("bulk");
+  if (bulk) wireBulk(bulk);
+
   /* Homepage rows navigate on click. Delegated so a filename containing a
    * quote cannot break the handler, and so middle-click still opens a tab. */
   function wireRowLinks() {
     document.addEventListener("click", function (ev) {
       var row = ev.target.closest ? ev.target.closest("tr[data-href]") : null;
       if (!row) return;
+      // A checkbox lives inside a clickable row, so ticking one would open the
+      // clip and lose the tick. The checkbox wins.
+      if (ev.target.closest("input")) return;
       if (ev.metaKey || ev.ctrlKey || ev.shiftKey) {
         window.open(row.dataset.href, "_blank");
       } else {
         window.location.href = row.dataset.href;
       }
     });
+  }
+
+  /* Deleting footage is the one irreversible thing here, so the button stays
+   * out of the way until something is ticked, and says what it is about to take. */
+  function wireBulk(form) {
+    var bar = document.getElementById("bulk-bar"),
+        label = document.getElementById("bulk-count"),
+        head = document.getElementById("pickall"),
+        boxes = form.querySelectorAll("input[name=name]");
+
+    form.addEventListener("change", function (ev) {
+      if (ev.target === head) {
+        for (var i = 0; i < boxes.length; i++) boxes[i].checked = head.checked;
+      }
+      paint();
+    });
+    form.addEventListener("submit", function (ev) {
+      var n = picked();
+      if (!n) { ev.preventDefault(); return; }
+      // Archiving is a flag we flip back from the other tab, so only Trash asks.
+      if (!ev.submitter || !ev.submitter.classList.contains("danger")) return;
+      if (!confirm("Move " + n + " clip" + (n === 1 ? "" : "s") +
+            " to the Trash?\n\nExtracted frames and their selections go with it. " +
+            "The video itself can be put back from Finder.")) {
+        ev.preventDefault();
+      }
+    });
+    paint();
+
+    function picked() {
+      return form.querySelectorAll("input[name=name]:checked").length;
+    }
+    function paint() {
+      var n = picked();
+      bar.classList.toggle("hidden", n === 0);
+      label.textContent = n + " clip" + (n === 1 ? "" : "s") + " selected";
+      // Half-ticked is a real state: the header box must not claim "all" when
+      // you have picked three of twelve.
+      head.checked = n > 0 && n === boxes.length;
+      head.indeterminate = n > 0 && n < boxes.length;
+    }
   }
 
   function pollJob(box) {

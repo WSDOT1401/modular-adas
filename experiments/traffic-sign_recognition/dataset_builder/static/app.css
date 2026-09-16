@@ -119,6 +119,23 @@ table.videos {
 .videos tbody tr { cursor: pointer; }
 .videos tbody tr:hover { background: oklch(96% 0.018 258); }
 .videos .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Tabs read as one control, so they sit in a tray rather than floating free. */
+.tabs { display: inline-flex; gap: 2px; margin-bottom: 12px; padding: 3px;
+        background: var(--line-2); border-radius: var(--r-sm); }
+.tabs a { padding: 5px 12px; border-radius: 4px; color: var(--muted); font-size: 13px; font-weight: 500; }
+.tabs a:hover { color: var(--ink); text-decoration: none; }
+.tabs a.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px oklch(0% 0 0 / .07); }
+.tabs .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.empty-tab { padding: 28px 0; }
+
+.videos .pickcol { width: 36px; padding-right: 0; }
+.videos .pickcol input { display: block; margin: 0; cursor: pointer; accent-color: var(--accent); }
+
+/* Absent until a clip is ticked: a permanently visible delete button on a page
+   whose rows are all clickable is an invitation to the wrong click. */
+.bulk-bar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; }
+button.danger { border-color: var(--danger); color: var(--danger); }
+button.danger:hover { background: var(--danger); border-color: var(--danger); color: oklch(99% 0 0); }
 .videos .name { font-weight: 500; }
 .icon { width: 34px; text-align: center; font-size: 15px; }
 .tick { color: var(--ok); }
