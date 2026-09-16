@@ -101,3 +101,5 @@ experiments/traffic-sign_recognition/dataset_builder/workspace/
 # negation below unreachable.
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/datasets/*
 !experiments/traffic-sign_recognition/thai-traffic-sign-labs/datasets/extractor.py
+# Generated audit figures (~15 MB). qa/*.py stay tracked.
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/qa/out/

@@ -85,6 +85,8 @@ def train_one(
     project: pathlib.Path | None = None,
     export: bool = True,
     device: str | None = None,
+    batch: int = BATCH,
+    cache: bool = True,
 ) -> dict:
     """Train, validate the best checkpoint, export, and return a summary dict."""
     from ultralytics import YOLO
@@ -102,8 +104,10 @@ def train_one(
         data=str(data_yaml),
         epochs=epochs,
         imgsz=imgsz,
-        batch=BATCH,
-        cache=True,            # 900 images fit in RAM; drop if Kaggle complains
+        batch=batch,
+        cache=cache,           # GTSDB's 900 images at 1360x800 fit in RAM. Bigger
+                               # frames (Thai dashcam is 2304x1296) do not — pass
+                               # cache=False there or Colab OOMs mid-run.
         patience=PATIENCE,
         plots=True,
         seed=0,                # the deliverable is a 640-vs-1024 comparison,
@@ -137,6 +141,7 @@ def train_one(
         "dataset": dataset_meta,
         "names": names,
         "imgsz": imgsz,
+        "batch": batch,
         "epochs_requested": epochs,
         "epochs_run": int(getattr(trainer, "epoch", epochs - 1)) + 1,
         "optimizer": type(trainer.optimizer).__name__,
@@ -158,6 +163,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label-set", required=True, choices=classes.LABEL_SETS)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--batch", type=int, default=BATCH)
+    parser.add_argument("--no-cache", action="store_true",
+                        help="stream images from disk instead of caching in RAM")
     parser.add_argument("--weights", default=DEFAULT_WEIGHTS)
     parser.add_argument("--project", type=pathlib.Path, default=None)
     parser.add_argument("--no-export", action="store_true", help="skip the NCNN exports")
@@ -168,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         args.data, args.label_set, args.imgsz,
         epochs=args.epochs, weights=args.weights,
         project=args.project, export=not args.no_export, device=args.device,
+        batch=args.batch, cache=not args.no_cache,
     )
     print(json.dumps(summary, indent=2))
     return 0
