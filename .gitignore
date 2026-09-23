@@ -104,3 +104,5 @@ experiments/traffic-sign_recognition/thai-traffic-sign-labs/datasets/*
 # Generated audit figures (~15 MB). qa/*.py stay tracked.
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/qa/out/
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/results/*
+# autolabel scratch
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/work/

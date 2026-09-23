@@ -32,11 +32,101 @@ SUPER_CLASS_IDS: dict[str, tuple[int, ...]] = {
 
 # Sets whose mapping keys are GTSDB ids, so they must cover all 43.
 GTSDB_LABEL_SETS = ("4class", "1class")
-LABEL_SETS = GTSDB_LABEL_SETS + ("thai3",)
+LABEL_SETS = GTSDB_LABEL_SETS + ("thai3", "thai_fine")
 
 # Thai supercategories, in output-index order. This IS the class order in
 # data.yaml and in every exported model — reordering it invalidates weights.
 THAI3_NAMES = ["Regulatory", "Warning", "Information"]
+
+
+# ---------------------------------------------------------------- thai_fine --
+# The fine-grained target: a STOP sign is ``stop``, not ``Regulatory``.
+#
+# Grouped by the thai3 supercategory it lives under, because the annotation
+# pipeline shows a VLM only the candidates for a crop's already-known coarse
+# class — that is what makes the decision ~23-way instead of ~30-way. Flattened
+# in THAI_FINE_NAMES order, so each parent owns a contiguous block of indices.
+#
+# As with THAI3_NAMES: this order IS the class order in data.yaml and in every
+# exported model. Append, never reorder.
+#
+# (Exception, 2026-09-23: reserved_for_pedestrians -> pedestrian_crossing, moved
+# Regulatory -> Warning. Indices shifted, which is safe only because nothing has
+# been trained on thai_fine yet. From here on, append.)
+#
+# ``other_*`` means "clearly a sign, legible, just not on this list" — never
+# "too blurry to tell". Conflating those teaches the model that a grey smudge is
+# an ``other_*`` sign. Unreadable crops are dropped, not labelled.
+THAI_FINE_BY_PARENT: dict[str, tuple[str, ...]] = {
+    "Regulatory": (
+        "stop",
+        "give_way",
+        "no_entry",
+        "no_left_turn",
+        "no_right_turn",
+        "no_left_u_turn",
+        "no_right_u_turn",
+        "no_stopping_parking",
+        "roundabout",
+        "speed_limit_30",
+        "speed_limit_50",
+        "speed_limit_60",
+        "speed_limit_80",
+        # Any other posted limit (40/90/100/120...). Without this, a 40 km/h
+        # sign would have to go to other_regulatory, and the model would see
+        # "red circle + number" labelled two contradictory ways.
+        "speed_limit_other",
+        "keep_left",
+        "keep_right",
+        "keep_left_or_right",
+        "end_of_restriction",
+        "turn_left",
+        "turn_right",
+        "reserved_for_bus",
+        "other_regulatory",
+    ),
+    "Warning": (
+        "left_curve",
+        "right_curve",
+        "t_junction_left",
+        "t_junction_right",
+        "t_junction",
+        # Yellow-green diamond with a walking figure: "people cross here".
+        # NOT the blue circle "pedestrians only" sign — different shape,
+        # different supercategory. It is the single most common sign in
+        # this footage (32 of the first 73 gold crops).
+        "pedestrian_crossing",
+        "other_warning",
+    ),
+    # Thai Information signs are mostly text and direction boards with no fixed
+    # iconography, so there is nothing stable to enumerate. Kept as one bucket
+    # deliberately — say so when asked why it is not subdivided like the others.
+    "Information": (
+        # Blue square, white U-turn arrow, usually with a supplementary plate
+        # ("under the bridge", "100 m"). Square, not circular, so it points at a
+        # U-turn facility rather than commanding one — hence Information, not
+        # Regulatory. Distinct from no_left_u_turn / no_right_u_turn, which
+        # prohibit the manoeuvre. 6 of the first 133 gold crops.
+        "u_turn",
+        # Catch-all, and deliberately the only other entry: Thai information
+        # signs are mostly text and direction boards with no fixed iconography,
+        # so there is nothing stable to enumerate. Keep it last.
+        "information",
+    ),
+}
+
+THAI_FINE_NAMES = [n for group in THAI_FINE_BY_PARENT.values() for n in group]
+
+# fine class name -> its thai3 parent, for the VLM prompt and for collapsing a
+# fine prediction back to the coarse label.
+THAI_FINE_PARENT: dict[str, str] = {
+    name: parent for parent, group in THAI_FINE_BY_PARENT.items() for name in group
+}
+
+
+def _thai_fine() -> tuple[list[str], dict[int, int]]:
+    """Identity mapping: annotations are authored directly in these indices."""
+    return list(THAI_FINE_NAMES), {i: i for i in range(len(THAI_FINE_NAMES))}
 
 
 def _four_class() -> tuple[list[str], dict[int, int]]:
@@ -58,7 +148,12 @@ def _thai3() -> tuple[list[str], dict[int, int]]:
     return list(THAI3_NAMES), {i: i for i in range(len(THAI3_NAMES))}
 
 
-_BUILDERS = {"4class": _four_class, "1class": _one_class, "thai3": _thai3}
+_BUILDERS = {
+    "4class": _four_class,
+    "1class": _one_class,
+    "thai3": _thai3,
+    "thai_fine": _thai_fine,
+}
 
 
 def label_set(name: str) -> tuple[list[str], dict[int, int]]:
