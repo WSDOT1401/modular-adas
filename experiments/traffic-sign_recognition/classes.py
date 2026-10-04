@@ -54,32 +54,32 @@ THAI3_NAMES = ["Regulatory", "Warning", "Information"]
 # Regulatory -> Warning. Indices shifted, which is safe only because nothing has
 # been trained on thai_fine yet. From here on, append.)
 #
+# Trimmed 2026-10-03: give_way, no_entry, no_left_u_turn, roundabout,
+# end_of_restriction and t_junction drew zero examples across 35 clips, so they
+# were cut rather than shipped as classes that can never be scored. Their crops
+# fall to the matching other_* bucket, so no footage is lost. keep_left and
+# keep_right are also empty so far but were kept deliberately.
+#
 # ``other_*`` means "clearly a sign, legible, just not on this list" — never
 # "too blurry to tell". Conflating those teaches the model that a grey smudge is
 # an ``other_*`` sign. Unreadable crops are dropped, not labelled.
 THAI_FINE_BY_PARENT: dict[str, tuple[str, ...]] = {
     "Regulatory": (
         "stop",
-        "give_way",
-        "no_entry",
         "no_left_turn",
         "no_right_turn",
-        "no_left_u_turn",
         "no_right_u_turn",
         "no_stopping_parking",
-        "roundabout",
-        "speed_limit_30",
-        "speed_limit_50",
-        "speed_limit_60",
-        "speed_limit_80",
-        # Any other posted limit (40/90/100/120...). Without this, a 40 km/h
-        # sign would have to go to other_regulatory, and the model would see
-        # "red circle + number" labelled two contradictory ways.
-        "speed_limit_other",
+        # One class for every posted limit, the number deliberately not split
+        # out. Per-value classes (30/50/60/80/...) each drew a handful of
+        # examples from 35 clips -- the signs are identical but for the digits,
+        # so splitting them spent the data on eight thin classes instead of one
+        # solid one. Read the number as an attribute once detection is good
+        # enough to be worth it.
+        "speed_limit",
         "keep_left",
         "keep_right",
         "keep_left_or_right",
-        "end_of_restriction",
         "turn_left",
         "turn_right",
         "reserved_for_bus",
@@ -90,7 +90,6 @@ THAI_FINE_BY_PARENT: dict[str, tuple[str, ...]] = {
         "right_curve",
         "t_junction_left",
         "t_junction_right",
-        "t_junction",
         # Yellow-green diamond with a walking figure: "people cross here".
         # NOT the blue circle "pedestrians only" sign — different shape,
         # different supercategory. It is the single most common sign in

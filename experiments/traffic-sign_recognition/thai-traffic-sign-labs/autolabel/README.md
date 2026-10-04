@@ -1,5 +1,8 @@
 # autolabel — fine-grained Thai sign labelling
 
+> Measured results — agreement rate, answer-key composition, detector
+> accuracy, and the limitations to declare — live in **[RESULTS.md](RESULTS.md)**.
+
 Goal: turn the 3-class detector into a **fine-grained** dataset, so a STOP sign
 is labelled `stop` and not just `Regulatory`.
 
@@ -71,8 +74,7 @@ autolabel/
 ├── track.py               # [1] video -> tracks -> best frame per sign -> CVAT zip
 ├── cvat.py                # read a CVAT export / write a CVAT-importable zip
 ├── crops.py               # [3a] CVAT export -> upscaled crops + manifest
-├── classify.py            # [3b] crops -> fine class, via Claude Opus 5 (local)
-├── classify_qwen.ipynb    # [3b] same job, via Qwen2.5-VL-7B (Colab, needs GPU)
+├── classify.py            # [3b] `run` (GPU) names each crop; `score` grades it
 ├── propagate.py           # [5]  confirmed labels -> every frame of each track
 ├── test_autolabel.py      # the one runnable check
 └── work/                  # gitignored scratch: frames, crops, zips, predictions
@@ -250,20 +252,119 @@ closest frame of each sign. If most crops are still unreadable, peak-frame
 picking is not working — wrong `--imgsz`, fragmenting tracks, or too coarse a
 `--vid-stride`. Otherwise you are measuring your frame selection, not the model.
 
+### Settling the disagreements
+
+`score` writes `disagreements.csv`. Do not hand-edit folders — the two labellers
+must end up agreeing on the *same* crop, and a settlement applied to one side
+only quietly keeps the disagreement.
+
+```bash
+python gold.py sheet     # -> disagreements.png, every disputed crop captioned
+                         #    with who said what. Screen-share it on a call.
+$EDITOR work/gold/settled.txt    # "<number> <class>", one per line
+python gold.py apply     # writes the agreed label into BOTH folders
+python gold.py score     # re-score
+```
+
+**Report the agreement rate from *before* you settled.** After `apply` the
+score reads 100%, which is arithmetic, not a finding. The pre-settlement number
+is the human ceiling and the only one that belongs in the thesis.
+
 ### What the number means
 
-| VLM accuracy | Meaning | Action |
+**Do not grade the VLM on accuracy.** `information` is 56% of the answer key,
+and once a crop's coarse class is known the Information parent offers only two
+choices — so a program that never opens the image ("Information → information,
+Warning → other_warning, Regulatory → no_stopping_parking") scores **76.6%
+accuracy**. Any accuracy below that is worse than blind, and one just above it
+has measured nothing.
+
+Grade on **macro-recall**: per-class recall, averaged with every class weighted
+equally, over the 9 classes with ≥5 examples. The blind program scores **33%**
+there. `classify.py score` prints both baselines next to every number so you
+cannot quote one without the other.
+
+| macro-recall | Meaning | Action |
 |---|---|---|
-| ≥ 85% | Reliable | Run the pipeline; step 4 is spot-checking |
-| 60-85% | Useful but often wrong | Run it, but review **every** crop |
-| < 60% | You would spend longer fixing than labelling | Stop and hand-label |
+| ≤ 33% | No better than never opening the image | The VLM path is dead; report it and move on |
+| 33-50% | Reads some signs, not enough to auto-label | Report as a negative result — still a chapter |
+| > 50% | Worth building steps 3b-5 around | Run the pipeline, review every crop at step 4 |
 
-Compare it against your human ceiling too: 87% against a 90% human ceiling is an
-excellent result, not a mediocre one.
+Classes with <5 examples are printed but excluded from the average — `stop` has
+exactly one crop, and one crop cannot produce a percentage. That is a footage
+problem; fix it with a camera, not with arithmetic.
 
-This number is also your headline for the thesis. *"Qwen2.5-VL reached 71%
-against a 93% human ceiling on Thai fine-grained signs"* is a finding.
-*"We used a VLM"* is not.
+Report it against the human ceiling: *"Qwen2.5-VL reached X% macro-recall
+against a 91.7% inter-annotator agreement on Thai fine-grained signs, where a
+class-prior baseline reaches 33%"* is a finding. *"We used a VLM"* is not.
+
+### Labelling with someone remote
+
+`work/` is gitignored, so a partner cannot pull the crops. Send them the folder
+instead — it holds the queue and nothing else, so it is blind by construction.
+Never send `work/gold/`: that contains the other labeller's answers, and a
+labeller who has seen them agrees with them.
+
+```bash
+# out: stage a copy, keep the empty class folders alive, zip it (~16 MB / 458 crops)
+cd work/gold
+rm -rf /tmp/pack && mkdir -p /tmp/pack
+cp -R labels/partner /tmp/pack/partner && cp labels/sort_gold.py /tmp/pack/
+find /tmp/pack/partner -type d -empty -exec touch {}/.keep \;
+(cd /tmp/pack && zip -rq ../partner_labelling.zip .)
+
+# back: drop their folder in and score
+unzip -o ~/Downloads/partner.zip -d work/gold/labels/
+python3 gold.py score
+```
+
+The `.keep` files matter: the empty class folders *are* the button list in
+`sort_gold.py`, and some unzip tools silently drop empty directories — the
+partner would open the app and find no buttons. `.keep` is invisible to every
+`*.jpg` glob in here.
+
+Check the `labelled by both:` line after scoring. If it is below the number you
+sent, they labelled a stale set and the missing crops are silently excluded.
+
+---
+
+## Adding more footage later
+
+Labelling is incremental: finished work is never re-queued, and a crop already
+in the set is never swapped for a different picture. Three commands.
+
+```bash
+cd experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel
+
+# 1. drop the new .MP4s into footages/golden/, then track ONLY the new clips
+python track.py --footage footages/golden --out work/pass2 \
+                --skip-done work/gold/tracks.json
+
+# 2. fold the new crops in and queue them for everyone
+python gold.py add --dir work/gold --from work/pass2
+
+# 3. label
+python work/gold/labels/sort_gold.py
+```
+
+Use a fresh `--out` each time (`work/pass2`, `work/pass3`, ...) and keep them:
+they hold the full `tracks.json`, including the sub-threshold tracks that get no
+crop but still belong to the coarse detector set.
+
+**Why this is safe to repeat.** Crop ids are `<clip>_t<track>`, derived from the
+source rather than a counter. A counter restarts at 1 every run, so a second
+batch would emit different images under names already labelled in the first and
+silently corrupt the answer key. Derived ids are stable across re-runs and unique
+across clips, so re-running a clip is a no-op instead of a swap.
+
+`gold.py add` only queues crops a given person has neither labelled nor already
+got queued, and it creates folders for any class added to `classes.py` since the
+last run. `gold.py init` is for a fresh workspace only — running it again would
+re-queue work that is already done.
+
+One wrinkle: `--skip-done` skips by clip name, and a clip that produced no
+labelable crops never lands in `tracks.json`, so it gets tracked again. Wasted
+minutes, nothing worse.
 
 ---
 
@@ -340,31 +441,69 @@ are already big.
 
 ### 3b. Classify
 
-**Qwen path (try first, it is free):** open `classify_qwen.ipynb` in Colab. Two
-things will bite you:
-
-- **7B in bf16 is ~16.5 GB and will NOT fit a free T4.** Load in 4-bit with
-  `bitsandbytes` (~6 GB, fits fine), or pay for an L4/A100.
-- **Set `min_pixels` / `max_pixels` on the processor.** Qwen2.5-VL resizes
-  images dynamically and the default will shrink your crops back down. This is
-  the single biggest accuracy lever for small signs.
-
-**Opus path (fallback):**
+`classify.py` splits in two because `run` needs ~6 GB of VRAM and `score`
+needs stdlib — so you can re-grade a finished run on your laptop as often as you
+like without touching a GPU.
 
 ```bash
-python classify.py --manifest work/crops/manifest.json --out work/predictions.json
+python classify.py run   --dir work/gold --out work/predictions.csv   # Colab T4
+python classify.py score --dir work/gold --pred work/predictions.csv  # laptop
+python classify.py selfcheck                                          # anywhere
 ```
 
-Either way:
+**Running it on Colab.** A 7B VLM will not fit an 8 GB Mac, and in bf16 (~16.5
+GB) it will not fit a free T4 either. `run` loads it in 4-bit NF4 (~6 GB) with
+fp16 compute — not bf16, because the free T4 is Turing and has no bf16 units.
+Build the bundle and upload it:
+
+```bash
+rm -rf work/vlm_run && mkdir -p work/vlm_run/work/gold
+cp classify.py ../../classes.py work/vlm_run/            # classes.py sits alongside
+cp -r work/gold/crops work/gold/answer_key.csv work/gold/source_map.csv work/vlm_run/work/gold/
+(cd work && zip -qr vlm_run.zip vlm_run)                 # ~14 MB
+```
+
+`classes.py` has to be copied flat next to `classify.py`: in the repo it lives
+two directories up, which does not survive a zip.
+
+Then in Colab (Runtime → Change runtime type → **T4 GPU**):
+
+```python
+!pip -q install -U transformers accelerate bitsandbytes
+!python classify.py run --limit 2      # smoke test; this is where a version mismatch shows up
+!python classify.py run                # the real run, ~25 min, resumes from the 2 above
+```
+
+`predictions.csv` is flushed per crop and `run` resumes, so a dead Colab session
+costs you nothing.
+
+**The one setting that silently ruins the run.** Qwen2.5-VL picks its own input
+resolution, and the default *shrinks* a 448 px crop. For a sign whose whole
+identity is a small glyph that is fatal — and it fails quietly, you just get bad
+numbers. `MIN_PIXELS`/`MAX_PIXELS` floor it, and `run` prints the size the model
+actually saw for crop 1:
+
+```
+crop 1: file 448x448 -> model sees 448x448 px  (floor 448²)
+```
+
+If that second number is smaller, stop the run.
+
+Three prompt decisions, all in `prompt_for()`:
 
 - Show the model **only the candidates for that crop's coarse class.** A
   Regulatory crop never sees the Warning options. That is what step 2 bought you
-  — it cuts the decision from ~27 ways to ~9.
-- Always include **`other_*`** and an **abstain** option, so the model is never
-  forced to guess.
-- Get confidence from **agreement across 5 samples**, not by asking the model how
-  confident it is. Self-reported LLM confidence is not calibrated; agreement rate
-  is.
+  — it cuts the decision from 21 ways to at most 13.
+- The coarse class comes from the **human label**, not the detector. In the real
+  pipeline a person fixes it in CVAT at step 2, so that is the honest
+  simulation; feeding the detector's guess (right 91.2% of the time) would leave
+  you unable to say whether a bad score was the VLM's fault or the detector's.
+- Always include **`other_*`** and **`unclear`**, so the model is never forced to
+  guess. Both are scored as wrong, so the headline number stays conservative.
+
+Confidence from agreement across 5 samples is deliberately *not* here: that
+serves step 4's review ordering, not this measurement. Greedy decoding is
+cheaper and reproducible. Add sampling when you have a queue to sort.
 
 ## Step 4 — you check the names
 

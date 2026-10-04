@@ -36,170 +36,293 @@ from ultralytics import YOLO
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 import classes  # noqa: E402
 
+
+def _iou(a, b):
+    x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+    x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    i = (x2 - x1) * (y2 - y1)
+    return i / ((a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - i)
+
+
+def _centre(b):
+    return ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+
+
+def same_sign(a, b):
+    """Are these two tracks the same physical sign?
+
+    ByteTrack splits one sign two ways, and both were measured on this footage:
+
+    * **concurrent** -- the detector emits two overlapping boxes for one sign
+      (wide multi-panel gantries especially), so two ids live at once. 57 of 543.
+    * **hand-off** -- a track is lost for a few frames and the sign is reborn
+      under a new id. 31 of 543.
+
+    Together they made 15% of the gold set duplicates, 82% of it inside
+    ``information``, which is exactly where the big overhead boards are.
+    """
+    A = sorted(a, key=lambda d: d["frame"])
+    B = sorted(b, key=lambda d: d["frame"])
+    ma = {d["frame"]: d for d in A}
+    mb = {d["frame"]: d for d in B}
+    shared = set(ma) & set(mb)
+    if shared and sum(1 for f in shared
+                      if _iou(ma[f]["xyxy"], mb[f]["xyxy"]) > 0.5) >= 2:
+        return True
+    for x, y in ((A, B), (B, A)):
+        gap = y[0]["frame"] - x[-1]["frame"]
+        if not -3 <= gap <= 12:
+            continue
+        px, py = _centre(x[-1]["xyxy"]), _centre(y[0]["xyxy"])
+        dist = ((px[0]-py[0])**2 + (px[1]-py[1])**2) ** 0.5
+        ratio = y[0]["size"] / max(x[-1]["size"], 1e-9)
+        if dist < max(x[-1]["size"], y[0]["size"]) and 0.5 < ratio < 2.0:
+            return True
+    return False
+
+
+def dedup_tracks(tracks, _max_rounds=10):
+    """Merge tracks that are the same sign. ``{tid: [det, ...]}`` in and out.
+
+    The surviving id is the one whose best view is biggest, so the crop written
+    later is the closest look at that sign across every fragment of it.
+
+    Repeats until nothing changes: merging A and B widens the frame span, which
+    can make the result a hand-off match for a C that neither half reached on
+    its own. One pass left exactly that case behind on the real footage.
+    """
+    for _ in range(_max_rounds):
+        merged = _dedup_once(tracks)
+        if len(merged) == len(tracks):
+            return merged
+        tracks = merged
+    return tracks
+
+
+def _dedup_once(tracks):
+    ids = list(tracks)
+    parent = {t: t for t in ids}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i, a in enumerate(ids):
+        for b in ids[i+1:]:
+            if find(a) != find(b) and same_sign(tracks[a], tracks[b]):
+                parent[find(a)] = find(b)
+
+    groups = collections.defaultdict(list)
+    for t in ids:
+        groups[find(t)].append(t)
+
+    merged = {}
+    for members in groups.values():
+        best = max(members, key=lambda t: max(d["size"] for d in tracks[t]))
+        # keep one detection per frame -- the biggest, since overlapping ids on
+        # one sign disagree slightly and the larger box is the better crop
+        per_frame = {}
+        for t in members:
+            for d in tracks[t]:
+                cur = per_frame.get(d["frame"])
+                if cur is None or d["size"] > cur["size"]:
+                    per_frame[d["frame"]] = d
+        merged[best] = sorted(per_frame.values(), key=lambda d: d["frame"])
+    return merged
+
+
 HERE = pathlib.Path(__file__).resolve().parent
 MODEL = HERE.parent / "results/thai_runs_20260917-0529/f100/thai3-1280/weights/best.pt"
 
-p = argparse.ArgumentParser()
-p.add_argument("--footage", required=True, type=pathlib.Path)
-p.add_argument("--out", required=True, type=pathlib.Path)
-p.add_argument("--model", default=MODEL)
-p.add_argument("--conf", type=float, default=0.15)   # low on purpose: a false box is
-                                                     # one click to delete, a missed
-                                                     # sign is never seen again
-p.add_argument("--imgsz", type=int, default=1280)    # what the model was trained at
-p.add_argument("--vid-stride", type=int, default=3)  # 10 samples/s at 30fps
-p.add_argument("--min-dets", type=int, default=3)    # <3 detections is usually noise
-# A track whose CLOSEST view is still tiny is one no human can name, so it gets no
-# crop and never enters the fine-labelling queue. It stays in tracks.json and in
-# the CVAT task, because its coarse class is still verifiable and still useful to
-# the detector -- only the fine label is impossible.
-p.add_argument("--min-best-side", type=float, default=60)
-p.add_argument("--crop-px", type=int, default=448)   # upscale target for the VLM
-p.add_argument("--ctx-scale", type=float, default=2.5)
-p.add_argument("--audit-frames", type=int, default=5)
-p.add_argument("--limit", type=int)                  # only N clips (for the gold set)
-p.add_argument("--device", default="mps")
-p.add_argument("--skip", default="", help="comma-separated clip stems to ignore")
-args = p.parse_args()
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--footage", required=True, type=pathlib.Path)
+    p.add_argument("--out", required=True, type=pathlib.Path)
+    p.add_argument("--model", default=MODEL)
+    p.add_argument("--conf", type=float, default=0.15)   # low on purpose: a false box is
+                                                         # one click to delete, a missed
+                                                         # sign is never seen again
+    p.add_argument("--imgsz", type=int, default=1280)    # what the model was trained at
+    # Ultralytics defaults to 0.7, which lets two overlapping boxes survive on one
+    # wide sign and gives ByteTrack two things to track. 0.5 suppresses them at
+    # source; dedup_tracks() cleans up whatever still slips through.
+    p.add_argument("--iou", type=float, default=0.5)
+    p.add_argument("--vid-stride", type=int, default=3)  # 10 samples/s at 30fps
+    p.add_argument("--min-dets", type=int, default=3)    # <3 detections is usually noise
+    # A track whose CLOSEST view is still tiny is one no human can name, so it gets no
+    # crop and never enters the fine-labelling queue. It stays in tracks.json and in
+    # the CVAT task, because its coarse class is still verifiable and still useful to
+    # the detector -- only the fine label is impossible.
+    p.add_argument("--min-best-side", type=float, default=60)
+    p.add_argument("--crop-px", type=int, default=448)   # upscale target for the VLM
+    p.add_argument("--ctx-scale", type=float, default=2.5)
+    p.add_argument("--audit-frames", type=int, default=5)
+    p.add_argument("--limit", type=int)                  # only N clips (for the gold set)
+    p.add_argument("--device", default="mps")
+    p.add_argument("--skip", default="", help="comma-separated clip stems to ignore")
+    p.add_argument("--skip-done", type=pathlib.Path,
+                   help="a previous run's tracks.json; its clips are skipped")
+    args = p.parse_args()
 
-skip = {s for s in args.skip.split(",") if s}
-videos = sorted(v for v in args.footage.glob("*.MP4") if v.stem not in skip)
-if args.limit:
-    videos = videos[: args.limit]
-if not videos:
-    sys.exit(f"no videos in {args.footage}")
+    skip = {s for s in args.skip.split(",") if s}
+    if args.skip_done and args.skip_done.exists():
+        done = {r["clip"] for r in json.loads(args.skip_done.read_text())}
+        print(f"skipping {len(done)} clip(s) already in {args.skip_done}")
+        skip |= done
+    videos = sorted(v for v in args.footage.glob("*.MP4") if v.stem not in skip)
+    if args.limit:
+        videos = videos[: args.limit]
+    if not videos:
+        sys.exit(f"no videos in {args.footage}")
 
-for sub in ("frames", "labels", "crops", "crops_ctx", "audit"):
-    (args.out / sub).mkdir(parents=True, exist_ok=True)
+    for sub in ("frames", "labels", "crops", "crops_ctx", "audit"):
+        (args.out / sub).mkdir(parents=True, exist_ok=True)
 
-model = YOLO(args.model)
-all_tracks: list[dict] = []
-crop_n = 0
+    model = YOLO(args.model)
+    all_tracks: list[dict] = []
+    crop_n = 0
 
-for vid in videos:
-    print(f"[{vid.stem}] tracking...", flush=True)
-    # tid -> list of detections; frame_no is the SOURCE frame index
-    dets: dict[int, list[dict]] = collections.defaultdict(list)
-    n_read = 0
-    # persist=False, not True: Model.track() registers its callbacks on the FIRST
-    # call only and freezes that persist value forever (ultralytics engine/model.py).
-    # One call per video means the tracker is built fresh per clip -- which is the
-    # reset we want. persist=True makes clip 2 inherit clip 1's live tracks, so a
-    # sign still alive at the end of one clip swallows detections from the next.
-    for r in model.track(source=str(vid), stream=True, persist=False,
-                         tracker="bytetrack.yaml", conf=args.conf, imgsz=args.imgsz,
-                         device=args.device, verbose=False, vid_stride=args.vid_stride):
-        # The loader grabs vid_stride frames and retrieves the LAST one, so the
-        # first frame it yields is source index vid_stride-1, not 0. Without the
-        # offset every box is recorded two frames early -- ~15px of dashcam motion
-        # on a 30-60px sign, and nothing about the output looks wrong.
-        frame_no = n_read * args.vid_stride + args.vid_stride - 1
-        n_read += 1
-        b = r.boxes
-        if b is None or b.id is None:
-            continue
-        for i, tid in enumerate(b.id.tolist()):
-            x1, y1, x2, y2 = (float(v) for v in b.xyxy[i].tolist())
-            dets[int(tid)].append({
-                "frame": frame_no,
-                "xyxy": [x1, y1, x2, y2],
-                "cls": int(b.cls[i]),
-                "conf": float(b.conf[i]),
-                "size": max(x2 - x1, y2 - y1),
-            })
+    for vid in videos:
+        print(f"[{vid.stem}] tracking...", flush=True)
+        # tid -> list of detections; frame_no is the SOURCE frame index
+        dets: dict[int, list[dict]] = collections.defaultdict(list)
+        n_read = 0
+        # persist=False, not True: Model.track() registers its callbacks on the FIRST
+        # call only and freezes that persist value forever (ultralytics engine/model.py).
+        # One call per video means the tracker is built fresh per clip -- which is the
+        # reset we want. persist=True makes clip 2 inherit clip 1's live tracks, so a
+        # sign still alive at the end of one clip swallows detections from the next.
+        for r in model.track(source=str(vid), stream=True, persist=False,
+                             tracker="bytetrack.yaml", conf=args.conf, imgsz=args.imgsz, iou=args.iou,
+                             device=args.device, verbose=False, vid_stride=args.vid_stride):
+            # The loader grabs vid_stride frames and retrieves the LAST one, so the
+            # first frame it yields is source index vid_stride-1, not 0. Without the
+            # offset every box is recorded two frames early -- ~15px of dashcam motion
+            # on a 30-60px sign, and nothing about the output looks wrong.
+            frame_no = n_read * args.vid_stride + args.vid_stride - 1
+            n_read += 1
+            b = r.boxes
+            if b is None or b.id is None:
+                continue
+            for i, tid in enumerate(b.id.tolist()):
+                x1, y1, x2, y2 = (float(v) for v in b.xyxy[i].tolist())
+                dets[int(tid)].append({
+                    "frame": frame_no,
+                    "xyxy": [x1, y1, x2, y2],
+                    "cls": int(b.cls[i]),
+                    "conf": float(b.conf[i]),
+                    "size": max(x2 - x1, y2 - y1),
+                })
 
-    tracks = {t: d for t, d in dets.items() if len(d) >= args.min_dets}
-    print(f"    {len(dets)} raw tracks -> {len(tracks)} kept (>={args.min_dets} dets)")
+        tracks = {t: d for t, d in dets.items() if len(d) >= args.min_dets}
+        before = len(tracks)
+        tracks = dedup_tracks(tracks)
+        print(f"    {len(dets)} raw -> {before} kept (>={args.min_dets} dets) "
+              f"-> {len(tracks)} after dedup (-{before - len(tracks)})")
 
-    # one decode pass: pull every frame we need from this clip
-    peak = {t: max(d, key=lambda x: x["size"]) for t, d in tracks.items()}
-    wanted = {pk["frame"]: [] for pk in peak.values()}
-    for t, pk in peak.items():
-        wanted[pk["frame"]].append(t)
-    cap = cv2.VideoCapture(str(vid))
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    audit = set(random.sample(range(total), min(args.audit_frames, total)))
+        # one decode pass: pull every frame we need from this clip
+        peak = {t: max(d, key=lambda x: x["size"]) for t, d in tracks.items()}
+        wanted = {pk["frame"]: [] for pk in peak.values()}
+        for t, pk in peak.items():
+            wanted[pk["frame"]].append(t)
+        cap = cv2.VideoCapture(str(vid))
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        audit = set(random.sample(range(total), min(args.audit_frames, total)))
 
-    for fno in sorted(set(wanted) | audit):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, fno)
-        ok, img = cap.read()
-        if not ok:
-            continue
-        H, W = img.shape[:2]
-        stem = f"{vid.stem}_f{fno:06d}"
-        if fno in audit:
-            cv2.imwrite(str(args.out / "audit" / f"{stem}.jpg"), img)
-        if fno not in wanted:
-            continue
+        for fno in sorted(set(wanted) | audit):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, fno)
+            ok, img = cap.read()
+            if not ok:
+                continue
+            H, W = img.shape[:2]
+            stem = f"{vid.stem}_f{fno:06d}"
+            if fno in audit:
+                cv2.imwrite(str(args.out / "audit" / f"{stem}.jpg"), img)
+            if fno not in wanted:
+                continue
 
-        # full frame + YOLO label file for CVAT
-        cv2.imwrite(str(args.out / "frames" / f"{stem}.jpg"), img)
-        lines = []
-        for t in wanted[fno]:
-            x1, y1, x2, y2 = peak[t]["xyxy"]
-            lines.append(f"{peak[t]['cls']} {((x1+x2)/2)/W:.6f} {((y1+y2)/2)/H:.6f} "
-                         f"{(x2-x1)/W:.6f} {(y2-y1)/H:.6f}")
-        (args.out / "labels" / f"{stem}.txt").write_text("\n".join(lines) + "\n")
+            # full frame + YOLO label file for CVAT
+            cv2.imwrite(str(args.out / "frames" / f"{stem}.jpg"), img)
+            lines = []
+            for t in wanted[fno]:
+                x1, y1, x2, y2 = peak[t]["xyxy"]
+                lines.append(f"{peak[t]['cls']} {((x1+x2)/2)/W:.6f} {((y1+y2)/2)/H:.6f} "
+                             f"{(x2-x1)/W:.6f} {(y2-y1)/H:.6f}")
+            (args.out / "labels" / f"{stem}.txt").write_text("\n".join(lines) + "\n")
 
-        # crops — named neutrally so the gold set gives nothing away
-        for t in wanted[fno]:
-            labelable = peak[t]["size"] >= args.min_best_side
-            cid = None
-            if labelable:
-                crop_n += 1
-                cid = f"crop_{crop_n:04d}"
-            x1, y1, x2, y2 = peak[t]["xyxy"]
-            for name, scale in (("crops", 1.0), ("crops_ctx", args.ctx_scale)) if labelable else ():
-                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-                hw, hh = (x2 - x1) * scale / 2, (y2 - y1) * scale / 2
-                a, b_, c, d = (max(0, int(cx - hw)), max(0, int(cy - hh)),
-                               min(W, int(cx + hw)), min(H, int(cy + hh)))
-                patch = img[b_:d, a:c]
-                if patch.size == 0:
-                    continue
-                if max(patch.shape[:2]) < args.crop_px:
-                    s = args.crop_px / max(patch.shape[:2])
-                    patch = cv2.resize(patch, None, fx=s, fy=s,
-                                       interpolation=cv2.INTER_LANCZOS4)
-                cv2.imwrite(str(args.out / name / f"{cid}.jpg"), patch)
-            all_tracks.append({
-                "crop_id": cid,
-                "labelable": labelable,
-                "clip": vid.stem,
-                "track_id": t,
-                "coarse": classes.THAI3_NAMES[peak[t]["cls"]],
-                "peak": peak[t],
-                "n_dets": len(tracks[t]),
-                "flips_class": len({d["cls"] for d in tracks[t]}) > 1,
-                "members": tracks[t],
-            })
-    cap.release()
+            # crops — named neutrally so the gold set gives nothing away
+            for t in wanted[fno]:
+                labelable = peak[t]["size"] >= args.min_best_side
+                # Derived from clip + track, never a running counter: a counter
+                # restarts at 1 on every run, so a later run would emit different
+                # images under names already labelled in an earlier one and quietly
+                # corrupt the answer key. This id is stable across re-runs and
+                # unique across clips. It leaks the source clip, not the class, so
+                # blind labelling is unaffected.
+                cid = f"{vid.stem}_t{t:04d}" if labelable else None
+                if labelable:
+                    crop_n += 1
+                x1, y1, x2, y2 = peak[t]["xyxy"]
+                for name, scale in (("crops", 1.0), ("crops_ctx", args.ctx_scale)) if labelable else ():
+                    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                    hw, hh = (x2 - x1) * scale / 2, (y2 - y1) * scale / 2
+                    a, b_, c, d = (max(0, int(cx - hw)), max(0, int(cy - hh)),
+                                   min(W, int(cx + hw)), min(H, int(cy + hh)))
+                    patch = img[b_:d, a:c]
+                    if patch.size == 0:
+                        continue
+                    if max(patch.shape[:2]) < args.crop_px:
+                        s = args.crop_px / max(patch.shape[:2])
+                        patch = cv2.resize(patch, None, fx=s, fy=s,
+                                           interpolation=cv2.INTER_LANCZOS4)
+                    cv2.imwrite(str(args.out / name / f"{cid}.jpg"), patch)
+                all_tracks.append({
+                    "crop_id": cid,
+                    "labelable": labelable,
+                    "clip": vid.stem,
+                    "track_id": t,
+                    "coarse": classes.THAI3_NAMES[peak[t]["cls"]],
+                    "peak": peak[t],
+                    "n_dets": len(tracks[t]),
+                    "flips_class": len({d["cls"] for d in tracks[t]}) > 1,
+                    "members": tracks[t],
+                })
+        cap.release()
 
-(args.out / "tracks.json").write_text(json.dumps(all_tracks, indent=1))
+    (args.out / "tracks.json").write_text(json.dumps(all_tracks, indent=1))
 
-# CVAT YOLO 1.1 import layout
-task = args.out / "_cvat"
-shutil.rmtree(task, ignore_errors=True)
-(task / "obj_train_data").mkdir(parents=True)
-for f in (args.out / "frames").glob("*.jpg"):
-    shutil.copy(f, task / "obj_train_data" / f.name)
-    shutil.copy(args.out / "labels" / f"{f.stem}.txt", task / "obj_train_data")
-(task / "obj.names").write_text("\n".join(classes.THAI3_NAMES) + "\n")
-(task / "obj.data").write_text(
-    f"classes = {len(classes.THAI3_NAMES)}\ntrain = data/train.txt\n"
-    "names = data/obj.names\nbackup = backup/\n")
-(task / "train.txt").write_text(
-    "\n".join(f"data/obj_train_data/{f.name}"
-              for f in sorted((args.out / "frames").glob("*.jpg"))) + "\n")
-shutil.make_archive(str(args.out / "cvat_task"), "zip", task)
-shutil.rmtree(task)
+    # CVAT YOLO 1.1 import layout
+    task = args.out / "_cvat"
+    shutil.rmtree(task, ignore_errors=True)
+    (task / "obj_train_data").mkdir(parents=True)
+    for f in (args.out / "frames").glob("*.jpg"):
+        shutil.copy(f, task / "obj_train_data" / f.name)
+        shutil.copy(args.out / "labels" / f"{f.stem}.txt", task / "obj_train_data")
+    (task / "obj.names").write_text("\n".join(classes.THAI3_NAMES) + "\n")
+    (task / "obj.data").write_text(
+        f"classes = {len(classes.THAI3_NAMES)}\ntrain = data/train.txt\n"
+        "names = data/obj.names\nbackup = backup/\n")
+    (task / "train.txt").write_text(
+        "\n".join(f"data/obj_train_data/{f.name}"
+                  for f in sorted((args.out / "frames").glob("*.jpg"))) + "\n")
+    shutil.make_archive(str(args.out / "cvat_task"), "zip", task)
+    shutil.rmtree(task)
 
-flips = sum(t["flips_class"] for t in all_tracks)
-lab = sum(t["labelable"] for t in all_tracks)
-print(f"\n{len(all_tracks)} signs from {len(videos)} clip(s)")
-print(f"  {lab} labelable (peak >= {args.min_best_side:.0f}px) -> crops written")
-print(f"  {len(all_tracks)-lab} too small for anyone to name — kept for the coarse "
-      "set, no crop")
-print(f"  {flips} ({100*flips/max(len(all_tracks),1):.0f}%) flipped coarse class mid-track"
-      " — review those first")
-print(f"  crops -> {args.out/'crops'}   CVAT -> {args.out/'cvat_task.zip'}")
+    flips = sum(t["flips_class"] for t in all_tracks)
+    lab = sum(t["labelable"] for t in all_tracks)
+    print(f"\n{len(all_tracks)} signs from {len(videos)} clip(s)")
+    print(f"  {lab} labelable (peak >= {args.min_best_side:.0f}px) -> crops written")
+    print(f"  {len(all_tracks)-lab} too small for anyone to name — kept for the coarse "
+          "set, no crop")
+    print(f"  {flips} ({100*flips/max(len(all_tracks),1):.0f}%) flipped coarse class mid-track"
+          " — review those first")
+    print(f"  crops -> {args.out/'crops'}   CVAT -> {args.out/'cvat_task.zip'}")
+
+
+
+if __name__ == "__main__":
+    main()
