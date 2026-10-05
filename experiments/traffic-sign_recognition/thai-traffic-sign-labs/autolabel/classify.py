@@ -28,6 +28,7 @@ import argparse
 import collections
 import csv
 import pathlib
+import re
 import sys
 
 _repo = pathlib.Path(__file__).resolve().parents[2]
@@ -37,6 +38,41 @@ import classes  # noqa: E402
 
 MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
 ABSTAIN = "unclear"
+
+# Prompt v2 (2026-10-04). v1 gave the model bare snake_case names and nothing
+# else, while the human annotators had the classes.py comments and their own
+# settlement rules -- an unfair comparison, not a model limitation.
+#
+# These lines are written from the gold crops themselves (one contact sheet of
+# three examples per class), NOT from v1's error list. Describing only the
+# classes that failed would be tuning the prompt against the test set, and the
+# score would stop measuring the model. Two of them contradict European
+# convention and would have been wrong from memory: keep_left_or_right is a
+# yellow diamond here, and turn_left/turn_right are red-ringed white circles.
+LOOKS_LIKE = {
+    "stop": "red octagon with white text",
+    "no_left_turn": "white circle, red ring, black left-turn arrow struck through by a red diagonal",
+    "no_right_turn": "white circle, red ring, black right-turn arrow struck through by a red diagonal",
+    "no_right_u_turn": "white circle, red ring, black U-turn arrow struck through by a red diagonal",
+    "no_stopping_parking": "plain blue circle with a red ring and either a single red diagonal slash "
+                           "(no parking) or a red X (no stopping); no arrow or symbol inside",
+    "speed_limit": "white circle, red ring, one large black number; sometimes on a yellow backing board",
+    "keep_left": "blue circle with a white arrow pointing left",
+    "keep_right": "blue circle with a white arrow pointing right",
+    "keep_left_or_right": "yellow diamond with two black arrows, one pointing down-left and one "
+                          "down-right (pass on either side)",
+    "turn_left": "white circle, red ring, black arrow turning left",
+    "turn_right": "white circle, red ring, black arrow turning right",
+    "reserved_for_bus": "blue sign showing a white bus",
+    "left_curve": "yellow diamond, a single black arrow bending to the left",
+    "right_curve": "yellow diamond, a single black arrow bending to the right",
+    "t_junction_left": "yellow diamond, black T-shaped junction with the side road going left",
+    "t_junction_right": "yellow diamond, black T-shaped junction with the side road going right",
+    "pedestrian_crossing": "a walking figure on a crossing: either a blue square with a white figure, "
+                           "or a yellow-green diamond with a black figure",
+    "u_turn": "blue square with a white U-turn arrow, often with a small plate underneath",
+    "information": "large green or blue rectangular board with place names, text and direction arrows",
+}
 # Below this, a per-class recall is one or two crops wide and reports noise.
 MIN_SUPPORT = 5
 # Qwen2.5-VL picks its own input resolution and the default SHRINKS a 448px
@@ -73,14 +109,43 @@ def parents(root: pathlib.Path, key: dict[str, str]) -> dict[str, str]:
     return out
 
 
+def catch_all(parent: str) -> str:
+    """The "not on this list" option for a parent.
+
+    Regulatory and Warning have an explicit ``other_*``; Information does not --
+    classes.py makes ``information`` itself the catch-all and says to keep it
+    last. v2 built this name mechanically as ``"other_" + parent.lower()`` and so
+    offered Qwen ``other_information``, a class that does not exist. 80 of the
+    209 Information crops came back as it, and the substring parser below scored
+    every one of them as a confident ``information``. Both halves of that bug are
+    asserted in selfcheck.
+    """
+    group = classes.THAI_FINE_BY_PARENT[parent]
+    return next((o for o in group if o.startswith("other_")), group[-1])
+
+
 def prompt_for(parent: str) -> str:
-    opts = classes.THAI_FINE_BY_PARENT[parent]
-    lines = [f"- {o}" for o in opts if not o.startswith("other_")]
-    lines += [f"- other_{parent.lower()}  (clearly a {parent} sign, but not one of the above)",
-              f"- {ABSTAIN}  (too small or too blurry to read)"]
-    return (f"This photo is a Thai road sign. It is already known to be a "
-            f"{parent} sign.\n\nWhich sign is it? Reply with exactly one name "
-            "from this list and nothing else:\n\n" + "\n".join(lines))
+    other = catch_all(parent)
+    lines = [f"- {o}: {LOOKS_LIKE[o]}"
+             for o in classes.THAI_FINE_BY_PARENT[parent] if o != other]
+    shown = LOOKS_LIKE.get(other)
+    lines += [f"- {other}: " + (f"{shown}; also use this for any other {parent} sign that is "
+                                "not one of the above" if shown else
+                                f"a clear {parent} sign that is not exactly one of the above"),
+              f"- {ABSTAIN}: too small, blurry or obscured to read"]
+    # The closing rule targets v1's dominant failure: Qwen almost never picked a
+    # catch-all (4 of 78), preferring to name the nearest specific sign. Naming
+    # the behaviour is the fix; listing the option was not enough.
+    # "an Information", "a Regulatory": the vowel rule touches only the
+    # Information prompt, so Regulatory and Warning stay byte-identical to v2
+    # and their v3 results double as a consistency check on the run.
+    art = "an" if parent[0] in "AEIOU" else "a"
+    return (f"This photo is a Thai road sign, already known to be {art} {parent} sign.\n\n"
+            "Which sign is it? Reply with exactly one name from this list and "
+            "nothing else:\n\n" + "\n".join(lines) +
+            f"\n\nRule: if the sign does not match one of the descriptions above, "
+            f"answer {other}. Do not pick the closest match — a sign that merely "
+            f"resembles an option, without matching its description, is {other}.")
 
 
 def parse_answer(raw: str, parent: str) -> str:
@@ -93,7 +158,11 @@ def parse_answer(raw: str, parent: str) -> str:
     low = raw.lower()
     opts = sorted(classes.THAI_FINE_BY_PARENT[parent] + (ABSTAIN,), key=len, reverse=True)
     for o in opts:
-        if o in low:
+        # Word boundaries, not `in`: "other_information" contains "information"
+        # and a bare substring test silently scored 80 refusals as confident
+        # answers. "_" is a word character, so \b also separates keep_left from
+        # keep_left_or_right and no_right_turn from no_right_u_turn.
+        if re.search(rf"\b{re.escape(o)}\b", low):
             return o
     return "unparsed"
 
@@ -145,8 +214,13 @@ def cmd_run(args):
 
         if i == 1:   # prove the resize floor took effect before burning 25 min
             h, ww = inputs["image_grid_thw"][0][1:].tolist()
+            seen, have = ww * 14 * h * 14, img.size[0] * img.size[1]
+            # Only shrinking matters. Upscaling invents no detail but destroys
+            # none either; downscaling throws away the glyph that IS the answer.
+            verdict = ("OK" if seen >= have * 0.98 else
+                       "STOP — Qwen is shrinking the crops, this run is worthless")
             print(f"  crop 1: file {img.size[0]}x{img.size[1]} -> model sees "
-                  f"{ww * 14}x{h * 14} px  (floor {int(MIN_PIXELS ** .5)}²)")
+                  f"{ww * 14}x{h * 14} px  ({seen / have:.2f}x area) {verdict}")
 
         with torch.inference_mode():
             gen = model.generate(**inputs, max_new_tokens=16, do_sample=False)
@@ -259,7 +333,15 @@ def cmd_selfcheck(args):
     assert t["confusion"][("other_warning", ABSTAIN)] == 1
     assert parse_answer("I think it is no_right_u_turn.", "Regulatory") == "no_right_u_turn"
     assert parse_answer("keep_left_or_right", "Regulatory") == "keep_left_or_right"
+    assert parse_answer("keep_left", "Regulatory") == "keep_left"
     assert parse_answer("a blue rectangle", "Warning") == "unparsed"
+    # The v2 bug, both halves: the prompt must not invent a class, and an
+    # invalid reply must surface as unparsed rather than substring-match one.
+    assert catch_all("Information") == "information", catch_all("Information")
+    assert catch_all("Warning") == "other_warning"
+    assert catch_all("Regulatory") == "other_regulatory"
+    assert "other_information" not in prompt_for("Information")
+    assert parse_answer("other_information", "Information") == "unparsed"
     print("selfcheck ok")
 
 

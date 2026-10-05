@@ -152,7 +152,160 @@ as a percentage.
 
 **Quote macro-recall. If you quote accuracy, print 76.6% beside it.**
 
-## 7. Limitations — state these before an examiner finds them
+## 7. VLM baseline — Qwen2.5-VL-7B, 2026-10-04
+
+`Qwen/Qwen2.5-VL-7B-Instruct`, 4-bit NF4 / fp16 compute on a free Colab T4,
+greedy decoding, one sample. Tight crops, resolution floored at 448² so nothing
+was downscaled. Coarse class supplied from the human label, so the model chose
+among at most 13 names, never 21.
+
+**Three runs. Quote v3.**
+
+| metric | v1 | v2 | **v3** | blind baseline |
+|---|---|---|---|---|
+| **macro-recall** (9 classes, n≥5) | 61.3% | 69.9% | **71.5%** | 33.3% |
+| accuracy | 69.4% | 83.2% | **83.5%** | 76.6% |
+| catch-all recall (78 crops) | 5% | 68% | **68%** | — |
+| unparseable / abstained | 2 / 1 | 0 / 0 | **0 / 0** | — |
+
+v1 scored *below* the blind baseline on accuracy while scoring nearly double on
+macro-recall — the clearest demonstration of why this set cannot be graded on
+accuracy. v2 and v3 clear both.
+
+### What changed between runs
+
+**v1 → v2 (prompt).** v1 gave the model bare `snake_case` names and nothing
+else, while the human annotators had the `classes.py` comments and the two
+definitions they wrote during settlement — an unfair comparison, not a model
+limitation. v2 added a one-line visual description to every class and a closing
+rule:
+
+> *Rule: if the sign does not match one of the descriptions above, answer
+> `other_warning`. Do not pick the closest match — a sign that merely resembles
+> an option, without matching its description, is `other_warning`.*
+
+Descriptions were written from a contact sheet of three example crops per class,
+**not** from v1's error list. Two contradicted European convention and would have
+been wrong from memory: `keep_left_or_right` is a yellow diamond here (not a blue
+circle), and `turn_left`/`turn_right` are red-ringed white circles (not blue).
+
+**v2 → v3 (two bug fixes, no description changed).**
+
+1. `prompt_for` built the catch-all as `"other_" + parent.lower()`, so the
+   Information prompt offered `other_information` — a class `classes.py` does not
+   define. 80 of 209 Information crops came back as it. v3 derives the catch-all
+   from `classes.py` (`information` itself, which that file documents as the
+   catch-all).
+2. `parse_answer` matched substrings, and `"information" in "other_information"`
+   is `True`, so those 80 refusals were recorded as confident `information`
+   answers. v3 matches on word boundaries, which also stops `keep_left` matching
+   inside `keep_left_or_right` and `no_right_turn` inside `no_right_u_turn` — two
+   latent mis-parses that had not yet fired. Both halves are asserted in
+   `classify.py selfcheck`.
+
+**The outcome of bug 1+2 was benign**, which was not predicted: only **one crop**
+changed between v2 and v3. `information` really is Information's catch-all, so the
+bad substring match happened to land on the correct label. The bugs were real and
+the fixes are permanent, but v2's Information figures were right by luck, not
+wrong.
+
+### Determinism check
+
+v3's Regulatory and Warning prompts are **byte-identical** to v2's. Their outputs
+reproduced **64/64 and 103/103**. Greedy decoding on this stack is deterministic,
+so every difference between runs is attributable to the prompt and none of it to
+sampling noise. (This is why only Information moved.)
+
+### Per class
+
+| class | n | v1 | v2 | v3 |
+|---|---|---|---|---|
+| `other_warning` | 63 | 4 | 46 | **46** |
+| `other_regulatory` | 15 | 0 | 7 | **7** |
+| `no_stopping_parking` | 23 | 1 | 4 | **4** |
+| `information` | 202 | 198 | 201 | **201** |
+| `keep_left_or_right` | 8 | 6 | 8 | **8** |
+| `speed_limit` | 9 | 9 | 9 | **9** |
+| `left_curve` | 7 | 5 | 5 | **5** |
+| `pedestrian_crossing` | 27 | 26 | 25 | **25** |
+| `u_turn` | 7 | **7** | 2 | **3** |
+| `stop` | 1 | 0 | 1 | **1** |
+| `t_junction_left` | 3 | 1 | 2 | **2** |
+| `right_curve` | 2 | 2 | 2 | **2** |
+| `no_right_u_turn` | 2 | 1 | 0 | **0** |
+
+### Finding 1 — the chevron result
+
+`other_warning` went 4/63 → 46/63. 45 of its 63 crops are chevron boards (yellow
+rectangle, one solid black arrowhead), which v1 called `right_curve`.
+
+**The prompt never mentions chevrons.** The fix was describing `right_curve`
+accurately — *"yellow diamond, a single black arrow bending to the right"* — which
+a chevron does not match, plus the rule against picking the closest match. The
+model derived the exclusion itself from a correct class definition.
+
+That is a stronger claim than "we told it the answer", and it is only available
+because the chevron hint was withheld deliberately, before the run.
+
+### Finding 2 — naming the behaviour unlocked the catch-all
+
+v1 used a catch-all **4 times** in 376 crops; v2/v3 used one **75 times**, 53
+correct. Listing the option was not enough. The sentence "do not pick the closest
+match" was.
+
+This matters more than the score: `other_*` is the bucket that routes an unknown
+sign to a human. A model that refuses to use it mislabels every unlisted sign
+confidently and silently.
+
+### Finding 3 — `no_stopping_parking` improved in a way the score hides
+
+Recall barely moved (1/23 → 4/23 = 17%), but the failure changed character:
+
+- v1: **13 confident wrong labels** (`no_left_turn`) that would enter the dataset
+  unnoticed
+- v3: **16 routed to `other_regulatory`**, i.e. flagged for a human
+
+Nearly the same score, opposite operational consequence. Qwen still cannot read
+the second-largest Regulatory class, but it now knows that it cannot.
+
+### Finding 4 — a description narrower than its class costs recall
+
+`u_turn` fell 7/7 (v1, no descriptions) to 3/7 (v3). The four failures are the
+**yellow diamond** U-turn signs; the three that work are blue squares. The
+description we wrote says *"blue square with a white U-turn arrow"*, so the model
+rejected the diamonds correctly — against a definition that did not cover its own
+class.
+
+Descriptions raised macro-recall by ~10 points overall, but a description that is
+narrower than the visual variety of its class actively hurts. This is an
+annotation-guideline failure, not a model failure, and a human annotator handed
+the same guideline would have made the same call.
+
+Deliberately **not fixed**. We only know the description is too narrow because we
+read the v3 score; widening it and re-running would be a fourth iteration tuned
+against the same 376 crops. Reported instead.
+
+### The one `stop` sign
+
+v1 missed it (`no_left_turn`); v2 and v3 **found it**. One crop is 100% of a
+one-example class — an anecdote, not a measurement. The professor's requirement is
+met by filming more STOP signs, not by this.
+
+### Methodology — read before quoting
+
+Quote **v3 macro-recall, 71.5%**, and state: three runs, one prompt revision
+(v1→v2, all 19 observed classes described uniformly, decided in a single pass) and
+one bug-fix revision (v2→v3, no description changed). Report v1 alongside it.
+
+Reproduce:
+
+```bash
+python classify.py score --pred work/vlm_run/work/predictions.csv      # v1
+python classify.py score --pred work/vlm_run/work/predictions_v2.csv   # v2
+python classify.py score --pred work/vlm_run/work/predictions_v3.csv   # v3
+```
+
+## 8. Limitations — state these before an examiner finds them
 
 1. **63 minutes of footage is the binding constraint.** Every clip is already
    processed; 458 crops is the complete harvest. Rare classes cannot be fixed

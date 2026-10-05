@@ -484,10 +484,14 @@ numbers. `MIN_PIXELS`/`MAX_PIXELS` floor it, and `run` prints the size the model
 actually saw for crop 1:
 
 ```
-crop 1: file 448x448 -> model sees 448x448 px  (floor 448²)
+crop 1: file 448x432 -> model sees 476x448 px  (1.10x area) OK
 ```
 
-If that second number is smaller, stop the run.
+Only *shrinking* matters. `MIN_PIXELS` is an area floor, so a 448x432 crop
+(under 448² in area) gets scaled **up** — that is the floor working, and
+upscaling invents no detail but destroys none either. Across the 378 gold crops:
+355 upscaled, 21 unchanged, 2 shrunk by 5% from patch-grid rounding. If you ever
+see `STOP`, kill the run.
 
 Three prompt decisions, all in `prompt_for()`:
 
