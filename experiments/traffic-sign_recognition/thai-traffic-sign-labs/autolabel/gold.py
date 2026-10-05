@@ -64,7 +64,7 @@ def cmd_init(args):
         print(f"  {who}: {len(classes.THAI_FINE_NAMES)}+{len(SPECIAL)} folders, "
               f"{len(crops)} crops in {PILE}/")
 
-    print(f"\nDrag each crop out of {PILE}/ into the folder for what it is.")
+    print(f"\nNow label them:  python sort.py --dir {root}")
     print("Use too_small if nobody could read it. Use dont_know if YOU can't "
           "name it — then look it up; that folder must be empty at the end.")
     print(f"\nWhen both are done:  python gold.py score --dir {root}")
@@ -237,6 +237,48 @@ def cmd_apply(args):
     print(f"settled {moved} files across {len(people)} labellers — re-run `gold.py score`")
 
 
+def cmd_ingest(args):
+    """A reviewed CSV (crop_id -> label) into the class folders, so score sees it.
+
+    The answer key is built from folder contents and nothing else, so a review
+    done outside these folders -- in CVAT, say -- has no way back in without
+    this. Accepts either column name: classify.py writes `pred`, gold.py and
+    cvat.py write `label`.
+
+    **Only crops still in _unsorted/ are moved.** A crop already sitting in a
+    class folder was put there by a human looking at it blind, and that decision
+    outranks anything a model-assisted pass produced. Overwriting it would let a
+    later review quietly rewrite the answer key the earlier one established.
+    """
+    root = args.dir
+    rows = list(csv.DictReader(args.src.open()))
+    col = next((c for c in ("label", "pred") if rows and c in rows[0]), None)
+    if col is None:
+        sys.exit(f"{args.src}: want a 'label' or 'pred' column, got {list(rows[0]) if rows else []}")
+    labels = {r["crop_id"]: r[col] for r in rows}
+
+    bad = sorted({l for l in labels.values() if l not in KNOWN or l == PILE})
+    if bad:
+        sys.exit(f"{args.src}: not classes -> {', '.join(bad)}. Not guessing.")
+
+    people = sorted(p for p in (root / "labels").iterdir() if p.is_dir())
+    for who in people:
+        moved = held = 0
+        for cid, label in labels.items():
+            src = who / PILE / f"{cid}.jpg"
+            if not src.exists():
+                held += bool(list(who.glob(f"*/{cid}.jpg")))
+                continue
+            (who / label).mkdir(exist_ok=True)
+            shutil.move(src, who / label / f"{cid}.jpg")
+            moved += 1
+        print(f"  {who.name}: {moved} filed from {PILE}/"
+              + (f", {held} left alone (already labelled by hand)" if held else ""))
+
+    print(f"\nThese crops carry one reviewing pass, not two independent ones.\n"
+          f"  python gold.py score --dir {root} --solo")
+
+
 def cmd_score(args):
     root = args.dir
     people = sorted(p for p in (root / "labels").iterdir() if p.is_dir())
@@ -261,17 +303,32 @@ def cmd_score(args):
           "   <- your human ceiling")
     print(f"disagreed:        {len(both)-len(agree)}")
 
-    key = [(c, la[c]) for c in agree
-           if la[c] not in ("not_a_sign", "dont_know", "composite")]
+    EXCLUDE = ("not_a_sign", "dont_know", "composite")
+    key = [(c, la[c], 2) for c in agree if la[c] not in EXCLUDE]
     dropped = sum(1 for c in agree if la[c] == "not_a_sign")
     comp = sum(1 for c in agree if la[c] == "composite")
+
+    # Footage added after the agreement study is often labelled by one person
+    # (a partner round trip is a day of latency). Those crops cannot go in a
+    # key that is supposed to be two-annotator, but excluding them means new
+    # footage is unusable -- so they go in marked, and the agreement rate above
+    # is still computed on `both` alone and is unaffected.
+    if getattr(args, "solo", False):
+        seen = {**lb, **la}
+        only = sorted(set(seen) - set(both))
+        key += [(c, seen[c], 1) for c in only if seen[c] not in EXCLUDE]
+        print(f"\n--solo: added {sum(1 for c in only if seen[c] not in EXCLUDE)} "
+              f"crops labelled by one person only (of {len(only)}). They carry "
+              "annotators=1 in the key — say so in your limitations.")
+
     with (root / "answer_key.csv").open("w", newline="") as fh:
-        w = csv.writer(fh); w.writerow(["crop_id", "label"]); w.writerows(key)
+        w = csv.writer(fh)
+        w.writerow(["crop_id", "label", "annotators"]); w.writerows(key)
     with (root / "disagreements.csv").open("w", newline="") as fh:
         w = csv.writer(fh); w.writerow(["crop_id", a.name, b.name])
         w.writerows((c, la[c], lb[c]) for c in both if la[c] != lb[c])
 
-    dist = collections.Counter(l for _, l in key)
+    dist = collections.Counter(l for _, l, _n in key)
     small = dist.get("too_small", 0)
     print(f"\nanswer_key.csv: {len(key)} crops"
           f"   (excluded {dropped} not_a_sign = detector false positives"
@@ -289,6 +346,21 @@ def cmd_score(args):
         print(f"\n!! {100*small/len(key):.0f}% is too_small (>20%). Fix frame "
               "selection in step 1 before scoring any VLM, or you are measuring "
               "your crops, not the model.")
+    # How much work the pre-annotator actually saved. This is NOT the VLM's
+    # offline accuracy -- that was measured on crops nobody had to fix. This is
+    # the fraction of crops a reviewer waved through, which is the number that
+    # translates into hours your group did not spend.
+    log = root / "review_log.csv"
+    if log.exists():
+        seen = {}
+        for r in csv.DictReader(log.open()):           # replay, so undo really undoes
+            k = (r["crop_id"], r["annotator"])
+            seen.pop(k, None) if r["final"] == "UNDONE" else seen.update({k: r["accepted"] == "1"})
+        if seen:
+            ok = sum(seen.values())
+            print(f"\nreview: {ok}/{len(seen)} crops accepted as the model proposed "
+                  f"({100*ok/len(seen):.1f}%) — the rest were corrected by hand")
+
     empty = [n for n in classes.THAI_FINE_NAMES if dist.get(n, 0) == 0]
     if empty:
         print(f"\n{len(empty)}/{len(classes.THAI_FINE_NAMES)} classes have zero "
@@ -300,14 +372,20 @@ def cmd_score(args):
 ap = argparse.ArgumentParser()
 sub = ap.add_subparsers(dest="cmd", required=True)
 for name, fn in (("init", cmd_init), ("add", cmd_add), ("score", cmd_score),
-                 ("sheet", cmd_sheet), ("apply", cmd_apply)):
+                 ("sheet", cmd_sheet), ("apply", cmd_apply), ("ingest", cmd_ingest)):
     s = sub.add_parser(name)
     s.add_argument("--dir", type=pathlib.Path, default=pathlib.Path("work/gold"))
     if name == "init":
         s.add_argument("--annotators", default="annotator_a,annotator_b")
+    if name == "score":
+        s.add_argument("--solo", action="store_true",
+                       help="also key crops only one person labelled, marked annotators=1")
     if name == "add":
         s.add_argument("--from", dest="src", type=pathlib.Path,
                        help="a track.py output dir to fold in first")
+    if name == "ingest":
+        s.add_argument("--from", dest="src", type=pathlib.Path, required=True,
+                       help="a reviewed CSV, e.g. cvat.py import's output")
     s.set_defaults(fn=fn)
 args = ap.parse_args()
 args.fn(args)

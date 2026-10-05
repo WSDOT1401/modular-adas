@@ -83,26 +83,34 @@ MIN_SUPPORT = 5
 MIN_PIXELS, MAX_PIXELS = 448 * 448, 896 * 896
 
 
-def read_key(root: pathlib.Path) -> dict[str, str]:
+def read_key(root: pathlib.Path, required: bool = True) -> dict[str, str]:
     path = root / "answer_key.csv"
     if not path.exists():
-        sys.exit(f"{path} not found — run `python gold.py score` first")
+        if required:
+            sys.exit(f"{path} not found — run `python gold.py score` first")
+        return {}
     return {r["crop_id"]: r["label"] for r in csv.DictReader(path.open())}
 
 
-def parents(root: pathlib.Path, key: dict[str, str]) -> dict[str, str]:
+def parents(root: pathlib.Path, key: dict[str, str], crops=None) -> dict[str, str]:
     """Coarse class per crop: from the human label, else the detector's guess.
 
-    The human label is the honest source — in the real pipeline step 2 is a
-    person fixing the coarse class in CVAT, so that is what the VLM would see.
-    Only the handful of crops with no fine label (``too_small``) fall back to
-    source_map, purely so they can still be shown and scored as abstentions.
+    Which source is used is the difference between the two things this script
+    does, and it is worth being explicit about:
+
+    * **Measuring** (crops in the key) uses the *human* coarse label. In the real
+      pipeline a person fixes the coarse class during review, so that is what the
+      VLM would see. Feeding the detector's guess instead would leave you unable
+      to say whether a bad score was the VLM's fault or the detector's.
+    * **Pre-annotating** (``--unlabelled``, crops nobody has judged yet) has no
+      human label to use, so it falls back to the detector — which is right 91.2%
+      of the time. Those 8.8% reach the reviewer with the wrong option list, and
+      that is a real cost of pre-annotation, not a bug.
     """
     detector = {r["crop_id"]: r["coarse"]
                 for r in csv.DictReader((root / "source_map.csv").open())}
-    out = {}
-    for crop, label in key.items():
-        out[crop] = classes.THAI_FINE_PARENT.get(label) or detector.get(crop)
+    out = {c: classes.THAI_FINE_PARENT.get(key.get(c, "")) or detector.get(c)
+           for c in (key if crops is None else crops)}
     missing = [c for c, p in out.items() if p not in classes.THAI_FINE_BY_PARENT]
     if missing:
         sys.exit(f"no coarse class for {len(missing)} crops, e.g. {missing[:3]}")
@@ -174,15 +182,25 @@ def cmd_run(args):
     from PIL import Image
 
     root, out = args.dir, args.out
-    key, parent = read_key(root), None
-    parent = parents(root, key)
+    key = read_key(root, required=not args.unlabelled)
+    if args.unlabelled:
+        # The crops that need a label are exactly the ones the answer key has no
+        # opinion on. Running over the key instead would re-predict work humans
+        # have already settled, and predict nothing for the new footage.
+        seen = {r["crop_id"] for r in csv.DictReader((root / "source_map.csv").open())}
+        want = sorted(seen - set(key))
+        print(f"pre-annotating {len(want)} crops with no human label "
+              f"({len(key)} already settled, skipped)")
+    else:
+        want = sorted(key)
+    parent = parents(root, key, want)
     crops = args.crops or (root / "crops")
 
     done = {}
     if out.exists():   # Colab kills idle sessions; don't lose 20 minutes to one.
         done = {r["crop_id"]: r for r in csv.DictReader(out.open())}
         print(f"resuming: {len(done)} already predicted")
-    todo = [c for c in sorted(key) if c not in done]
+    todo = [c for c in want if c not in done]
     if args.limit:
         todo = todo[:args.limit]
     if not todo:
@@ -358,6 +376,10 @@ for name, fn in (("run", cmd_run), ("score", cmd_score), ("selfcheck", cmd_selfc
                        help="default <dir>/crops; point at crops_ctx for the context ablation")
         s.add_argument("--model", default=MODEL)
         s.add_argument("--limit", type=int, help="first N crops only, for a smoke test")
+    if name == "run":
+        s.add_argument("--unlabelled", action="store_true",
+                       help="pre-annotate crops NOT in the answer key (new footage). "
+                            "Without it, run only re-predicts the key, to measure.")
     s.set_defaults(fn=fn)
 args = ap.parse_args()
 args.fn(args)

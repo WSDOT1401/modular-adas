@@ -173,7 +173,10 @@ def main():
         done = {r["clip"] for r in json.loads(args.skip_done.read_text())}
         print(f"skipping {len(done)} clip(s) already in {args.skip_done}")
         skip |= done
-    videos = sorted(v for v in args.footage.glob("*.MP4") if v.stem not in skip)
+    # rglob + case-insensitive: clips may sit in footages/ directly or batched into
+    # footages/<date>/, and phone/dashcam exports are inconsistent about .MP4/.mp4
+    videos = sorted(v for v in args.footage.rglob("*")
+                    if v.suffix.lower() == ".mp4" and v.stem not in skip)
     if args.limit:
         videos = videos[: args.limit]
     if not videos:

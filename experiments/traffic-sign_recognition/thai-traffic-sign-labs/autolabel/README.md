@@ -1,366 +1,505 @@
-# autolabel — fine-grained Thai sign labelling
+# autolabel — build a fine-grained traffic-sign dataset from dashcam video
 
-> Measured results — agreement rate, answer-key composition, detector
-> accuracy, and the limitations to declare — live in **[RESULTS.md](RESULTS.md)**.
+Turn dashcam footage into a YOLO dataset where a STOP sign is labelled `stop`,
+not just `Regulatory` — without drawing thousands of boxes by hand.
 
-Goal: turn the 3-class detector into a **fine-grained** dataset, so a STOP sign
-is labelled `stop` and not just `Regulatory`.
+It is built for Thai signs but nothing here is Thai. Swap the class list and the
+detector weights and it builds the dataset for your country. See
+**[Porting this to your country](#porting-this-to-your-country)**.
 
-Doing that by hand means drawing thousands of boxes. This pipeline uses the
-model you already trained to do the boring parts, and keeps you in the loop
-twice so the model never has the last word.
+| | |
+|---|---|
+| **Input** | dashcam clips + a coarse sign detector you already trained |
+| **Output** | a YOLO dataset (`images/`, `labels/`, `data.yaml`) with fine classes |
+| **Human cost** | one click per *sign*, not per *frame* |
+| **Measured on 35 Thai clips** | 376 signs reviewed by hand → 2,456 labelled boxes |
 
-```
-[1] model watches the whole video, follows each sign, picks its clearest frame
-[2] YOU fix the boxes and coarse class in CVAT
-[3] VLM says which specific sign it is
-[4] YOU check the VLM's answers
-[5] the confirmed answer is copied onto every frame that sign appeared in
-```
-
-Steps 1, 3 and 5 are automatic. Steps 2 and 4 are you and your friend.
+Measured numbers for this dataset live in **[RESULTS.md](RESULTS.md)**.
+Why it is built this way, and what we tried that failed, lives in
+**[JOURNAL.md](JOURNAL.md)**.
 
 ---
 
-## The idea, in plain words
+## The core idea
 
-A 3-minute dashcam clip is **5400 frames**. The obvious approach is to grab a
-screenshot every few seconds and label those. That is what the current dataset
-did — a screenshot every 225 frames (7.5 seconds).
-
-Here is the problem. Watch one STOP sign go past:
+A 3-minute clip at 30 fps is 5,400 frames. Everyone's first instinct is to grab
+a screenshot every few seconds and label those. Watch one sign go past and you
+can see why that fails:
 
 ```
 second  8   ▫   appears far ahead        17 px
 second 10   ▪   getting closer           40 px
-second 12   ■   right in front of you    98 px   ← clearest
-second 13       gone, you drove past it
+second 12   ■   right in front of you    98 px   ← the only readable frame
+second 13       gone
 ```
 
-Screenshots at second 7.5 and second 15 give you a 15 px speck, or nothing at
-all. Every sign that appears and passes *between* two screenshots is lost
-entirely — at 7.5-second spacing you are blind for about 150 m of road at a time.
+Screenshots at second 7.5 and second 15 give you a 15 px speck, or nothing.
+Every sign that appears *between* two screenshots is lost completely.
 
-That is why the current dataset only has ~16 signs per clip.
+**So let the detector watch all 5,400 frames.** It follows each sign across
+frames, gives it an ID, and remembers which frame was closest. It hands you only
+that frame — one picture per sign, the clearest one.
 
-**Instead, let the model watch all 5400 frames.** It is a computer; it does not
-get bored, and it takes about 2 minutes. As it watches it follows each sign
-across frames and gives it an ID, and it remembers which frame was the clearest.
-Then it hands you only that frame.
+Then the payoff: you label that one clear frame, and the label is copied back
+onto **every frame the tracker followed that sign through** — including the
+17 px frames you could never have labelled by hand. Those distant examples are
+exactly what matters for driver assistance, where seeing a sign early is the
+whole point.
 
-> Like filming a friend walking toward you, then picking the one frame where
-> their face is clearest — instead of taking a photo every 10 seconds and hoping.
-
-**Measured on `2026_0912_013522.MP4` (3 min, 5400 frames):**
-
-| | screenshot every 7.5 s | model watches everything |
-|---|---|---|
-| Signs found per clip | ~16 | **66** |
-| Typical crop size | 41 px | **84 px** |
-| Computer time per clip | 0 | ~2.5 min |
-
-**4x more signs, from footage you already have.** Not because the model got
-better — because you stopped throwing away 99% of the video.
+```
+one human click  ──►  6.5 labelled boxes, at every distance   (measured)
+```
 
 ---
 
-## Where things go
+## Where the humans are
+
+This is a human-in-the-loop pipeline, not an automatic one. There are exactly
+two human passes and they do different jobs:
 
 ```
-autolabel/
-├── README.md              # this file
-├── gold.py                # [0] make the labelling folders / score the result
-│   └─ work/gold/labels/sort_gold.py   # click-to-label GUI, run it from there
-├── track.py               # [1] video -> tracks -> best frame per sign -> CVAT zip
-├── cvat.py                # read a CVAT export / write a CVAT-importable zip
-├── crops.py               # [3a] CVAT export -> upscaled crops + manifest
-├── classify.py            # [3b] `run` (GPU) names each crop; `score` grades it
-├── propagate.py           # [5]  confirmed labels -> every frame of each track
-├── test_autolabel.py      # the one runnable check
-└── work/                  # gitignored scratch: frames, crops, zips, predictions
+                                    ┌─────────────── automatic ───────────────┐
+  footage ──► track.py ──► crops ──►│                                         │
+                                    │                                         │
+  ╔═══════════════════════════════╗ │                                         │
+  ║ PASS A — blind labelling      ║ │   once, on your first ~400 crops        │
+  ║ sort.py  (no model answers)   ║ │   builds the answer key + the ceiling   │
+  ╚═══════════════════════════════╝ │                                         │
+                                    │                                         │
+            classify.py run ────────┤   VLM proposes a fine class per crop    │
+                                    │                                         │
+  ╔═══════════════════════════════╗ │                                         │
+  ║ PASS B — review               ║ │   every batch after that                ║
+  ║ sort.py   (fast, solo)        ║ │   Enter = accept, click = correct       ║
+  ║ cvat.py   (group, fixes boxes)║ │   the model's guess is the default      ║
+  ╚═══════════════════════════════╝ │                                         │
+                                    │                                         │
+            propagate.py ───────────┘──► YOLO dataset
 ```
 
-**The fine class list does not live here.** Put it in
-`experiments/traffic-sign_recognition/classes.py` as `THAI_FINE_BY_PARENT` —
-that file is already the single source of truth for label sets, and both the VLM
-prompt and any future training should read the same dict.
+**Pass A is the expensive one and you do it once.** Two people label the same
+crops independently, seeing no model output. That gives you two things: an
+*answer key* to grade models against, and an *agreement rate* — how often two
+humans agreed, which is the ceiling no model can meaningfully beat.
 
-**The handoff file.** `crops.py` writes `work/crops/manifest.json`. Both VLM
-scripts read it and write `work/predictions.json`. Same input, same output,
-different model — so swapping Qwen for Opus is swapping one script, and running
-both gives you a comparison for free.
+**Pass B is the one that saves you work, and it is every batch after the first.**
+The same tool, but each crop arrives with the VLM's answer already chosen. Enter
+accepts it; clicking a class corrects it. Nineteen choices collapse into one
+keypress for every crop the model got right.
+
+> `sort.py` logs every accept and correction to `review_log.csv`, and
+> `gold.py score` prints the accept rate. **That percentage is your real
+> labour-saving number** — not the VLM's offline accuracy, which was measured on
+> crops nobody had to fix.
+
+Pass B never runs unsupervised. The model's answer is a *default*, not a label.
 
 ---
 
-## Step 0 — build the gold set (do not skip)
-
-A gold set is an **answer key**: 150 crops that you label by hand, before you
-see any model output.
-
-Think of writing an exam answer key *before* grading rather than after. If you
-mark while looking at the student's answer you go "eh, close enough" — and the
-same thing happens when you review a label a model already filled in. Studies on
-model-assisted labelling find that reviewing pre-filled labels misses **more than
-half** the errors actually present. Without an answer key you end up with a
-dataset that *feels* verified and is not.
-
-> **Ordering note:** step 0 needs crops, and crops come from step 1. So run
-> step 1 on 2-3 clips first (it is fully automatic, ~8 minutes), build the gold
-> set from those, and only then decide whether to run the rest of the pipeline.
-> Use crops from step 1 rather than from the old hand-annotated dataset — those
-> are ~41 px, while real pipeline crops are ~84 px, so the old ones would be an
-> unfairly hard test.
-
-### The recipe
-
-**1. Get 150 crops.** Run step 1 on 3 clips (~200 signs), pick 150 at random.
-Name them so they give nothing away:
-
-```
-work/gold/crops/crop_0001.jpg ... crop_0150.jpg
-```
-
-Not `stop_0001.jpg`. The point is to go in blind.
-
-**2. Make the folders:**
+## Requirements
 
 ```bash
-python gold.py init --dir work/gold --annotators <you>,<friend>
+pip install ultralytics opencv-python pillow      # tkinter ships with Python
 ```
 
-Generated from `classes.py`, so a folder name can never drift from a class name.
-Each of you gets your own copy of the crops in `_unsorted/` — Finder *moves*
-files within a volume, so a shared pile would empty out for whoever labels
-second. When your `_unsorted/` is empty you are done.
+* A coarse detector (`best.pt`) trained on your own signs — 3 classes is enough.
+  This pipeline finds and follows signs with it; it does not need to know which
+  sign is which.
+* `classes.py` two directories up, defining `THAI_FINE_BY_PARENT`. One source of
+  truth for the label set: the folder names, the VLM prompt and `data.yaml` all
+  read it, so they cannot drift apart.
+* A GPU only for the VLM step (`classify.py run`, ~6 GB). Free Colab T4 works.
+  Everything else runs on a laptop.
 
+---
 
-```
-work/gold/<your-name>/        work/gold/<friend-name>/
-  stop/                         stop/
-  give_way/                     give_way/
-  speed_limit/                  speed_limit/
-  ...                           ...
-  other_regulatory/             other_regulatory/
-  too_small/                    too_small/
-  dont_know/                    dont_know/
-  not_a_sign/                   not_a_sign/
-```
-
-See **When you cannot give it a normal class** below before you start — the last
-four folders are not interchangeable.
-
-**3. Both of you label them all, separately, without talking.**
+## Step 1 — the detector watches the videos
 
 ```bash
-python work/gold/labels/sort_gold.py
+python track.py --footage footages --out work/pass1 \
+                --conf 0.15 --imgsz 1280 --vid-stride 3
 ```
 
-Pick your name, then click the class for each crop. `u` undoes a misclick — use
-it, because a misclick writes a wrong entry into the answer key and every later
-accuracy number is measured against that key. The GUI reads the folders as its
-config: whoever has a directory is a labeller, and their subfolders are the
-class list, so it never drifts from `classes.py`.
+Writes `work/pass1/`:
 
-(Dragging files in Finder works too — the folder name is the label either way.)
+| | |
+|---|---|
+| `tracks.json` | every sign, every frame it appeared in — **the file everything else needs** |
+| `crops/` | one tight crop per sign, at its closest view |
+| `crops_ctx/` | the same crop with surrounding road, for when the tight one is ambiguous |
+| `frames/`, `labels/`, `_cvat/` | peak frames + a CVAT-importable task, if you want to fix boxes |
+| `audit/` | random frames, for counting signs the detector never proposed |
 
-If you genuinely cannot tell, use `unsure/`. Do not guess: a guessed answer key
-is worse than no answer key.
+**The three settings that matter:**
 
-Both of you do all 150 rather than splitting 75/75, because of what step 4 gives
-you.
+* `--conf 0.15` — far lower than you would use for inference. A false box costs
+  one click to delete; a sign the detector never proposes is one you will never
+  find. Recall over precision here.
+* `--imgsz 1280` — match what the detector was trained at. At 640 it finds ~25%
+  fewer signs and picks them up much later.
+* `--vid-stride 3` — process every 3rd frame. At 30 fps that is still 10 samples
+  a second, plenty for the tracker to follow a sign. Budget ~2.5 min per clip.
 
-**4. Compare the two sets.** Two things fall out:
+**Open `audit/` and check it by hand.** Signs the detector misses in *every*
+frame never reach you and you would never know they were missing. That count is
+your false-negative rate, and it belongs in your limitations section.
 
-- Where you agree, it is settled.
-- **How often you agreed is your ceiling.** If two humans only agree 85% of the
-  time, no model can meaningfully score above 85% on this task — past that you
-  are measuring noise. Report this number; it is what makes the VLM score
-  interpretable.
+---
 
-**5. Score it:**
+## Step 2 — fix the boxes *(optional)*
+
+Import `work/pass1/_cvat/` into a CVAT task to delete non-signs, fix coarse
+classes, and draw signs the detector missed.
+
+**Agree on a box convention first and write it in the task description** — tight
+to the sign face, excluding the backing plate, or whatever you choose. An
+inconsistent convention costs mAP50-95 and is very hard to fix later.
+
+Skip this if your detector is good enough; the labelling pass below catches
+false positives anyway, via the `not_a_sign` folder.
+
+---
+
+## Step 3 — PASS A: build the answer key
+
+**You cannot skip this.** An answer key is 150+ crops labelled by hand *before
+anyone sees model output*. It is the exam answer key written before grading, not
+after — mark while looking at the student's answer and you go "eh, close
+enough". Reviewing pre-filled labels misses more than half the errors actually
+present, and you end up with a dataset that *feels* verified and is not.
 
 ```bash
+python gold.py init --dir work/gold --annotators <you>,<partner>
+python sort.py --dir work/gold          # both of you, separately, no talking
 python gold.py score --dir work/gold
 ```
 
-Prints the agreement rate (your ceiling), writes `answer_key.csv` from what you
-both agreed on, and `disagreements.csv` for the rest. Settle those together, move
-the files, and re-run. It also warns if `dont_know/` is non-empty, if `too_small`
-exceeds 20%, and lists classes with zero examples.
+`init` builds one folder per class per person, from `classes.py`, and copies the
+crops into each person's `_unsorted/`. Separate copies on purpose: moving a file
+removes it from a shared pile, so the first person to label would empty it for
+the second.
 
-```
-work/gold/answer_key.csv
+`sort.py` shows a crop and the class buttons. `u` undoes a misclick — use it, a
+misclick writes a wrong answer into the key and every later number is measured
+against it. `c` shows the wider context crop, which usually settles a hard one.
 
-crop_id,    label
-crop_0001,  stop
-crop_0002,  speed_limit
-crop_0003,  other_warning
-```
+**Both of you label all of them, not 75/75.** The overlap is the point.
 
-That file is the gold set.
+### The four folders that are not classes
 
-**6. Run the VLM on the same 150 crops** and compare to `answer_key.csv`.
-
-### When you cannot give it a normal class
-
-Four different situations, four different folders. Mixing them poisons the
-answer key.
-
-**The distinction that matters most: `other_regulatory` is not `too_small`.**
+Mixing these up poisons the key. The distinction that matters most:
 
 | | Meaning |
 |---|---|
-| `other_regulatory` | "I can see it perfectly. It is a real sign. It is just not one of our 8." |
+| `other_regulatory` | "I see it perfectly. Real sign. Just not one of our classes." |
 | `too_small` | "I cannot see it well enough to say anything." |
 
-Put blurry crops in `other_regulatory` and you teach the model that *grey smudge
-= other_regulatory*. It will then fire that class on every distant blob, and you
-will not notice until the results look strange.
+Put blurry crops in `other_regulatory` and you teach the model *grey smudge =
+other_regulatory*. It will then fire that class on every distant blob.
 
-**`not_a_sign/`** — shop banner, taillight, reflection. This is a *detector*
-mistake, not a VLM question; in the real pipeline you delete these in step 2, so
-they never reach the VLM. Remove them from the gold set before scoring, but
-count them: that count is the detector false-positive rate at `conf 0.15`. Over
-~30% means raise the threshold.
-
-**`too_small/`** — it is a sign, but unreadable. Keep it in the gold set; the
-correct answer is **abstain**. This measures something valuable: does the VLM
-know it cannot tell, or does it guess confidently? Recall that the detector
-scores 0.78 confidence on 20 px smudges — confident guessing on garbage is the
-failure mode to watch for.
-
-> Before giving up on a crop, open the context version (`crop_0042_ctx.jpg`).
-> The wider view often settles it. Rule of thumb: squinting for more than ~10
-> seconds means `too_small`.
-
-**`dont_know/`** — you can read it, you just do not recognise the sign. That is a
-you problem, not a data problem. Look it up in the Thai DOH sign manual or ask
-someone. **`dont_know/` must be empty when you finish**, or your answer key has
-holes in it.
-
-| Folder | In the gold set? | Correct VLM answer |
+| Folder | In the key? | What it means |
 |---|---|---|
-| `stop`, `give_way`, ... | yes | that class |
-| `other_regulatory` etc. | yes | `other_regulatory` |
-| `too_small` | yes | **abstain** |
-| `dont_know` | must be empty | — |
-| `not_a_sign` | no — excluded, counted separately | — |
+| `too_small` | yes | a real sign, unreadable — the correct model answer is **abstain** |
+| `not_a_sign` | no, counted separately | detector false positive. The count is your FP rate at `conf 0.15`; over ~30% means raise the threshold |
+| `composite` | no | the box holds a sign *assembly*, not a sign. The box is wrong, not the reading — fix it in CVAT |
+| `dont_know` | **must end empty** | you can read it, you just don't recognise it. Look it up |
 
-**Health check: if more than ~20% of crops land in `too_small`, stop and fix
-step 1 before scoring anything.** The point of tracking is to hand you the
-closest frame of each sign. If most crops are still unreadable, peak-frame
-picking is not working — wrong `--imgsz`, fragmenting tracks, or too coarse a
-`--vid-stride`. Otherwise you are measuring your frame selection, not the model.
+**If more than ~20% lands in `too_small`, stop and fix step 1** before measuring
+anything. The whole point of tracking is to hand you the closest frame of each
+sign. If most crops are still unreadable, peak-frame picking is broken — wrong
+`--imgsz`, fragmenting tracks, or too coarse a `--vid-stride`. Otherwise you are
+measuring your frame selection, not the model.
 
-### Settling the disagreements
-
-`score` writes `disagreements.csv`. Do not hand-edit folders — the two labellers
-must end up agreeing on the *same* crop, and a settlement applied to one side
-only quietly keeps the disagreement.
+### Settling disagreements
 
 ```bash
-python gold.py sheet     # -> disagreements.png, every disputed crop captioned
-                         #    with who said what. Screen-share it on a call.
-$EDITOR work/gold/settled.txt    # "<number> <class>", one per line
-python gold.py apply     # writes the agreed label into BOTH folders
-python gold.py score     # re-score
+python gold.py sheet                      # -> disagreements.png, captioned with who said what
+$EDITOR work/gold/settled.txt             # "<crop_id> <class>", one per line
+python gold.py apply                      # writes the agreed label into BOTH folders
+python gold.py score
 ```
 
-**Report the agreement rate from *before* you settled.** After `apply` the
-score reads 100%, which is arithmetic, not a finding. The pre-settlement number
-is the human ceiling and the only one that belongs in the thesis.
+Never hand-edit one person's folder: a settlement applied to one side only
+quietly keeps the disagreement.
 
-### What the number means
-
-**Do not grade the VLM on accuracy.** `information` is 56% of the answer key,
-and once a crop's coarse class is known the Information parent offers only two
-choices — so a program that never opens the image ("Information → information,
-Warning → other_warning, Regulatory → no_stopping_parking") scores **76.6%
-accuracy**. Any accuracy below that is worse than blind, and one just above it
-has measured nothing.
-
-Grade on **macro-recall**: per-class recall, averaged with every class weighted
-equally, over the 9 classes with ≥5 examples. The blind program scores **33%**
-there. `classify.py score` prints both baselines next to every number so you
-cannot quote one without the other.
-
-| macro-recall | Meaning | Action |
-|---|---|---|
-| ≤ 33% | No better than never opening the image | The VLM path is dead; report it and move on |
-| 33-50% | Reads some signs, not enough to auto-label | Report as a negative result — still a chapter |
-| > 50% | Worth building steps 3b-5 around | Run the pipeline, review every crop at step 4 |
-
-Classes with <5 examples are printed but excluded from the average — `stop` has
-exactly one crop, and one crop cannot produce a percentage. That is a footage
-problem; fix it with a camera, not with arithmetic.
-
-Report it against the human ceiling: *"Qwen2.5-VL reached X% macro-recall
-against a 91.7% inter-annotator agreement on Thai fine-grained signs, where a
-class-prior baseline reaches 33%"* is a finding. *"We used a VLM"* is not.
+**Report the agreement rate from *before* you settled.** After `apply` it reads
+100%, which is arithmetic, not a finding. The pre-settlement number is the human
+ceiling and the only one that belongs in a thesis.
 
 ### Labelling with someone remote
 
-`work/` is gitignored, so a partner cannot pull the crops. Send them the folder
-instead — it holds the queue and nothing else, so it is blind by construction.
-Never send `work/gold/`: that contains the other labeller's answers, and a
-labeller who has seen them agrees with them.
+`work/` is gitignored, so a partner cannot pull the crops. Send their folder —
+it holds the queue and nothing else, so it is blind by construction. **Never
+send `work/gold/`**: it contains the other labeller's answers, and a labeller
+who has seen them agrees with them.
 
 ```bash
-# out: stage a copy, keep the empty class folders alive, zip it (~16 MB / 458 crops)
 cd work/gold
 rm -rf /tmp/pack && mkdir -p /tmp/pack
-cp -R labels/partner /tmp/pack/partner && cp labels/sort_gold.py /tmp/pack/
+cp -R labels/partner /tmp/pack/partner
 find /tmp/pack/partner -type d -empty -exec touch {}/.keep \;
 (cd /tmp/pack && zip -rq ../partner_labelling.zip .)
+# they also need sort.py and classes.py; they run: python sort.py --dir .
 
-# back: drop their folder in and score
-unzip -o ~/Downloads/partner.zip -d work/gold/labels/
-python3 gold.py score
+unzip -o ~/Downloads/partner.zip -d work/gold/labels/      # when it comes back
+python gold.py score
 ```
 
-The `.keep` files matter: the empty class folders *are* the button list in
-`sort_gold.py`, and some unzip tools silently drop empty directories — the
-partner would open the app and find no buttons. `.keep` is invisible to every
-`*.jpg` glob in here.
-
-Check the `labelled by both:` line after scoring. If it is below the number you
-sent, they labelled a stale set and the missing crops are silently excluded.
+The `.keep` files matter: empty class folders *are* the button list, and some
+unzip tools silently drop empty directories. Check the `labelled by both:` line
+after scoring — if it is below what you sent, they labelled a stale set.
 
 ---
 
-## Adding more footage later
+## Step 4 — measure the pre-annotator
 
-Labelling is incremental: finished work is never re-queued, and a crop already
-in the set is never swapped for a different picture. Three commands.
+Before trusting a model to pre-fill labels, find out whether it is better than
+guessing.
 
 ```bash
-cd experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel
-
-# 1. drop the new .MP4s into footages/golden/, then track ONLY the new clips
-python track.py --footage footages/golden --out work/pass2 \
-                --skip-done work/gold/tracks.json
-
-# 2. fold the new crops in and queue them for everyone
-python gold.py add --dir work/gold --from work/pass2
-
-# 3. label
-python work/gold/labels/sort_gold.py
+python classify.py run   --dir work/gold --out work/predictions.csv   # GPU / Colab
+python classify.py score --dir work/gold --pred work/predictions.csv  # laptop
 ```
 
-Use a fresh `--out` each time (`work/pass2`, `work/pass3`, ...) and keep them:
-they hold the full `tracks.json`, including the sub-threshold tracks that get no
-crop but still belong to the coarse detector set.
+`run` has two modes, and the difference matters:
 
-**Why this is safe to repeat.** Crop ids are `<clip>_t<track>`, derived from the
+| | crops processed | coarse class from |
+|---|---|---|
+| *(default)* | the answer key | the **human** label |
+| `--unlabelled` | crops the key has no opinion on | the **detector** (91.2% right) |
+
+The default is for **measuring** — grading the model against labels humans
+already settled. `--unlabelled` is for **pre-annotating** new footage, where
+there is no human label yet. Measure first; only pre-annotate with a model you
+have already shown beats the baseline.
+
+**Do not grade it on accuracy.** If one class is 56% of your key, a program that
+never opens an image scores 76.6%. Grade on **macro-recall** — per-class recall
+averaged with every class weighted equally, over classes with ≥5 examples.
+`score` prints the blind baseline next to every number so you cannot quote one
+without the other.
+
+| macro-recall vs. the blind baseline | What to do |
+|---|---|
+| at or below it | the model is worthless here; report it and label by hand |
+| a little above | report as a negative result — still a finding |
+| well above | use it to pre-fill, and review every crop (step 5) |
+
+Report it against the human ceiling:
+*"Qwen2.5-VL reached 71.5% macro-recall against a 91.7% inter-annotator
+agreement, where a class-prior baseline reaches 33.3%"* is a finding.
+*"We used a VLM"* is not.
+
+### Running it on Colab
+
+A 7B VLM does not fit an 8 GB laptop, and in bf16 it does not fit a free T4
+either. `run` loads it 4-bit (~6 GB), fp16 compute — not bf16, because the free
+T4 is Turing and has no bf16 units.
+
+```bash
+rm -rf work/vlm_run && mkdir -p work/vlm_run/work/gold
+cp classify.py ../../classes.py work/vlm_run/          # classes.py must sit flat alongside
+cp -r work/gold/crops work/gold/answer_key.csv work/gold/source_map.csv work/vlm_run/work/gold/
+(cd work && zip -qr vlm_run.zip vlm_run)
+```
+
+```python
+!pip -q install -U transformers accelerate bitsandbytes
+!python classify.py run --limit 2     # smoke test — version mismatches show up here
+!python classify.py run               # ~25 min; resumes, so a dead session costs nothing
+```
+
+**The one setting that silently ruins the run.** Qwen picks its own input
+resolution and the default *shrinks* a 448 px crop. For a sign whose identity is
+one small glyph that is fatal, and it fails quietly — you just get bad numbers.
+`MIN_PIXELS`/`MAX_PIXELS` floor it, and `run` prints what the model actually saw:
+
+```
+crop 1: file 448x432 -> model sees 476x448 px  (1.10x area) OK
+```
+
+Only *shrinking* matters; upscaling invents no detail but destroys none. If you
+ever see `STOP`, kill the run.
+
+---
+
+## Step 5 — PASS B: review the pre-filled labels
+
+Two routes. They do the same job; pick by whether the **boxes** need fixing.
+
+| | `sort.py` | `cvat.py` → CVAT |
+|---|---|---|
+| speed | ~1 s per crop | slower |
+| who | one person at a time | the whole group, one task |
+| can fix the label | yes | yes |
+| **can fix the box** | **no** | **yes** |
+| records the accept rate | yes (`review_log.csv`) | no |
+
+**Boxes are worth fixing.** Only the peak frame of each sign is ever seen by a
+human; `propagate.py` then copies that box's geometry onto every other frame. A
+box fixed here is fixed on all ~6 frames that sign contributes — and a sloppy one
+is sloppy ~6 times.
+
+### Route A — `sort.py` (fast, solo)
+
+```bash
+cp work/predictions.csv work/gold/predictions.csv   # sort.py switches mode on this file
+python sort.py --dir work/gold
+python gold.py score --dir work/gold                # prints the accept rate
+```
+
+Same tool as pass A, but each crop opens with the model's answer selected.
+**Enter accepts, clicking a class corrects.** Work the whole queue — the point is
+a human decision on every crop, just a much cheaper one. Every decision is
+appended to `review_log.csv`, so the accept rate is measured, not estimated.
+
+### Route B — CVAT (group, fixes boxes)
+
+```bash
+python cvat.py export --tracks work/pass2/tracks.json --frames work/pass2/frames \
+                      --pred work/predictions.csv --out work/review_task.zip
+```
+
+In CVAT: **new task → create it with the labels from `obj.names` → upload the zip
+→ Import annotations → format `YOLO 1.1`.** Every box arrives already named with
+the model's guess. A crop with no usable prediction falls back to its coarse
+catch-all rather than being left out — a box that is not in the task is a sign
+nobody reviews.
+
+Your group then fixes labels and boxes, and marks false positives `not_a_sign`
+(a label, not a deletion — a missing box is indistinguishable from one nobody got
+to). When done, export the task as **YOLO 1.1**:
+
+```bash
+python cvat.py import --zip ~/Downloads/task_export.zip --tracks work/pass2/tracks.json \
+                      --frames work/pass2/frames --out work/reviewed.csv
+```
+
+```
+work/reviewed.csv: 371 reviewed signs
+  335 matched a reviewed box, 36 deleted -> not_a_sign
+  25 boxes the reviewers ADDED (signs the detector missed) — not imported,
+     they have no track to propagate along
+```
+
+Boxes are matched back to their sign by IoU, so a reviewer can move or retighten
+one without breaking the link. **Read the "ADDED" number** — it is your detector's
+false-negative count, and it belongs in your limitations.
+
+Then file those labels into the gold workspace, because `answer_key.csv` is built
+from the class folders and nothing else — a review done in CVAT has no other way
+back in:
+
+```bash
+python gold.py ingest --dir work/gold --from work/reviewed.csv
+```
+
+`ingest` only moves crops still sitting in `_unsorted/`. A crop already in a class
+folder was put there by a human looking at it blind, and that decision outranks
+anything a model-assisted pass produced — so a later review can never quietly
+rewrite the answer key an earlier one established.
+
+---
+
+## Step 6 — build the dataset
+
+```bash
+python propagate.py --report                       # the numbers, writes nothing
+python propagate.py --out work/dataset             # extract frames + labels
+```
+
+This is where the pipeline pays off. A sign seen at 17 px, 40 px and 98 px was
+read once at 98 px. All three sightings now carry the right label.
+
+```
+  376 labelled signs   18400 raw detections -> 2456 boxes on 2291 frames   (6.5x per sign)
+  frames: 1841 train / 450 val   (87 dropped: train+val signs share the frame)
+
+  class                   signs  val   boxes
+  information               202   40    1381
+  other_warning              69   14     407
+  ...
+```
+
+Then train:
+
+```bash
+yolo detect train data=work/dataset/data.yaml model=yolo11n.pt imgsz=1280 epochs=100
+```
+
+**Three rules it enforces, because each one silently inflates a score:**
+
+* **The split is by track, never by frame.** Two frames 0.1 s apart are nearly
+  the same picture; split by frame and your validation score measures
+  memorisation. Frames holding signs from both sides of the split are dropped.
+* **Every sign on a kept frame gets a box.** A real sign left unlabelled teaches
+  the detector that signs are background. Frames holding a sign nobody could
+  name (`too_small`, `composite`) are dropped for that reason.
+* **`not_a_sign` boxes stay unlabelled on purpose** — those are your detector's
+  own false positives, and leaving them in the image with no box is how it
+  learns to stop firing on them.
+
+**The knobs:**
+
+| flag | default | what it does |
+|---|---|---|
+| `--size-step` | `0.20` | keep a box once it has changed size by 20%. Lower = more near-duplicate frames, not more information |
+| `--min-signs` | `5` | a class backed by fewer distinct signs folds into its `other_*` catch-all |
+| `--val-frac` | `0.20` | share of *signs* (not frames) held out |
+
+**`--min-signs` is the honest one.** A class with one distinct sign cannot be
+learned (the model memorises that one signpost) and cannot be evaluated (one
+sign goes to train or val, never both). Left in, it adds a 0.0 AP row and
+overstates how many classes your dataset really covers. `--report` names every
+class it folded — **read that list, it is a list of what you still need to film.**
+
+---
+
+## Adding more footage
+
+Labelling is incremental: finished work is never re-queued, and a crop already
+in the set is never swapped for a different picture.
+
+```bash
+# 1. new clips into footages/ (any subfolder), then track ONLY those
+python track.py --footage footages --out work/pass2 --skip-done work/gold/tracks.json
+
+# 2. fold them in and queue them for everyone
+python gold.py add --dir work/gold --from work/pass2
+
+# 3. let the VLM propose a fine class for each new crop   (Colab, see step 4)
+#    --unlabelled = predict only crops the answer key has no opinion on
+python classify.py run --unlabelled --out work/predictions_v2.csv
+
+# 4. your group reviews — pick ONE route (see step 5)
+cp work/predictions_v2.csv work/gold/predictions.csv     # route A: sort.py
+python sort.py --dir work/gold
+#   -- or --
+python cvat.py export --tracks work/pass2/tracks.json --frames work/pass2/frames \
+                      --pred work/predictions_v2.csv --out work/review_task.zip
+python cvat.py import --zip ~/Downloads/task_export.zip --tracks work/pass2/tracks.json \
+                      --frames work/pass2/frames --out work/reviewed.csv
+
+# 5. rebuild the key and the dataset
+python gold.py score --dir work/gold --solo     # --solo if only one of you labelled
+python propagate.py --out work/dataset
+```
+
+**`--solo`.** `score` normally keys only crops *both* people labelled, because
+the agreement rate is the point. New footage is often labelled by one person —
+excluding it makes that footage useless. `--solo` keys those too, marked
+`annotators=1`, and the agreement rate stays computed on two-annotator crops
+alone so it is not diluted. Say in your limitations how many crops carry a 1.
+
+**Re-measure after new footage.** The baselines are computed from the key each
+time, so they move when the class balance moves. A VLM score against the old key
+is not comparable to one against the new — re-run both, or state which key each
+number came from.
+
+**Why re-running is safe.** Crop ids are `<clip>_t<track>`, derived from the
 source rather than a counter. A counter restarts at 1 every run, so a second
 batch would emit different images under names already labelled in the first and
-silently corrupt the answer key. Derived ids are stable across re-runs and unique
-across clips, so re-running a clip is a no-op instead of a swap.
-
-`gold.py add` only queues crops a given person has neither labelled nor already
-got queued, and it creates folders for any class added to `classes.py` since the
-last run. `gold.py init` is for a fresh workspace only — running it again would
-re-queue work that is already done.
+silently corrupt the key. Derived ids make re-running a clip a no-op.
 
 One wrinkle: `--skip-done` skips by clip name, and a clip that produced no
 labelable crops never lands in `tracks.json`, so it gets tracked again. Wasted
@@ -368,281 +507,55 @@ minutes, nothing worse.
 
 ---
 
-## Step 1 — the model watches the videos
+## Porting this to your country
 
-```bash
-python track.py --footage ../../dataset_builder/footage --out work/pass1 \
-                --conf 0.15 --imgsz 1280 --vid-stride 3
-```
+Nothing here knows what a Thai sign looks like. Three changes:
 
-Ultralytics does the tracking natively (`model.track(..., persist=True,
-tracker="bytetrack.yaml")`) — do not write your own tracker.
+**1. Your class list** — edit `THAI_FINE_BY_PARENT` in `../../classes.py`.
+Every class must belong to a coarse parent, and **every parent needs a catch-all**
+(`other_*`, or the last entry in the group) so no crop is ever unlabelable.
 
-For each track it picks the frame where the box is largest, and exports just
-those frames as a CVAT-importable zip.
+Derive the list from what is actually in your footage, not from your national
+sign manual. The manual has 300 signs; your road has 20. A class with three
+examples will embarrass you in the results table.
 
-**Point this at the 16 clips you have NOT annotated yet.** There are 42 clips in
-`dataset_builder/footage/` and only 26 are in the dataset. Automation only helps
-with work you have not already done — running this over frames you hand-labelled
-months ago produces nothing.
+> **Speed limits: one class, not eight.** The sign is identical except the
+> number. Splitting it gives you eight thin classes instead of one solid one;
+> read the number with OCR later if you need it.
 
-(Four clips in the dataset have no footage file here: `2025_1230_004245`,
-`20260908_184333_REC_F`, `20260909_115404_REC_F`, `20260909_115504_REC_F`. Worth
-finding out where those went.)
+**2. Your detector** — a coarse model trained on your signs. Point `MODEL` in
+`track.py` at it. Three classes is plenty; this pipeline only needs it to find
+signs and follow them, not to name them.
 
-**Settings, and why:**
+**3. Your VLM prompt** — `LOOKS_LIKE` in `classify.py` is one line of visual
+description per class ("yellow diamond, a single black arrow bending right").
 
-- `--conf 0.15` — much lower than you would use for inference. A false box is one
-  click to delete; a sign the model never proposes is one you will never find.
-  Recall over precision here.
-- `--imgsz 1280` — the size the model was trained at. It finds ~25% more signs
-  than 640 and picks them up from much further away (some tracks run 17 px →
-  98 px). 16 clips is about 40 minutes of compute. Run it over lunch.
-- `--vid-stride 3` — process every 3rd frame. At 30 fps that is still 10
-  samples per second, which is plenty for the tracker to follow a sign.
-
-**Also export ~5 random frames per clip as a recall audit.** Signs the model
-never detects in *any* frame never reach CVAT, and you would never know. Check
-those random frames by hand for missed signs — that gives you a false-negative
-rate to report.
-
-**Drop tracks with fewer than 3 detections.** About 30% of raw tracks are single
-spurious detections at `conf 0.15`.
-
-## Step 2 — you fix the boxes
-
-Import the zip into a new CVAT task. You and your friend:
-
-- delete boxes that are not signs
-- fix wrong coarse classes
-- draw signs the model missed (especially in the audit frames)
-
-**Agree on the box convention before you start** and write it at the top of the
-CVAT task description. Tight to the sign face, excluding the backing plate. The
-current dataset is inconsistent about this and it costs mAP50-95 (see the main
-dataset README).
-
-Export as **COCO 1.0** when done.
-
-## Step 3 — the VLM names each sign
-
-### 3a. Make the crops
-
-```bash
-python crops.py --coco work/pass2/instances_default.json --out work/crops
-```
-
-Cut out each box, upscale to ~448 px (Lanczos), and save a wider context crop
-alongside the tight one — VLMs read signs noticeably better with some road
-visible around them. Write `manifest.json` linking each crop back to its box.
-
-No zoom-in trickery needed: because step 1 picked the closest frame, the crops
-are already big.
-
-### 3b. Classify
-
-`classify.py` splits in two because `run` needs ~6 GB of VRAM and `score`
-needs stdlib — so you can re-grade a finished run on your laptop as often as you
-like without touching a GPU.
-
-```bash
-python classify.py run   --dir work/gold --out work/predictions.csv   # Colab T4
-python classify.py score --dir work/gold --pred work/predictions.csv  # laptop
-python classify.py selfcheck                                          # anywhere
-```
-
-**Running it on Colab.** A 7B VLM will not fit an 8 GB Mac, and in bf16 (~16.5
-GB) it will not fit a free T4 either. `run` loads it in 4-bit NF4 (~6 GB) with
-fp16 compute — not bf16, because the free T4 is Turing and has no bf16 units.
-Build the bundle and upload it:
-
-```bash
-rm -rf work/vlm_run && mkdir -p work/vlm_run/work/gold
-cp classify.py ../../classes.py work/vlm_run/            # classes.py sits alongside
-cp -r work/gold/crops work/gold/answer_key.csv work/gold/source_map.csv work/vlm_run/work/gold/
-(cd work && zip -qr vlm_run.zip vlm_run)                 # ~14 MB
-```
-
-`classes.py` has to be copied flat next to `classify.py`: in the repo it lives
-two directories up, which does not survive a zip.
-
-Then in Colab (Runtime → Change runtime type → **T4 GPU**):
-
-```python
-!pip -q install -U transformers accelerate bitsandbytes
-!python classify.py run --limit 2      # smoke test; this is where a version mismatch shows up
-!python classify.py run                # the real run, ~25 min, resumes from the 2 above
-```
-
-`predictions.csv` is flushed per crop and `run` resumes, so a dead Colab session
-costs you nothing.
-
-**The one setting that silently ruins the run.** Qwen2.5-VL picks its own input
-resolution, and the default *shrinks* a 448 px crop. For a sign whose whole
-identity is a small glyph that is fatal — and it fails quietly, you just get bad
-numbers. `MIN_PIXELS`/`MAX_PIXELS` floor it, and `run` prints the size the model
-actually saw for crop 1:
-
-```
-crop 1: file 448x432 -> model sees 476x448 px  (1.10x area) OK
-```
-
-Only *shrinking* matters. `MIN_PIXELS` is an area floor, so a 448x432 crop
-(under 448² in area) gets scaled **up** — that is the floor working, and
-upscaling invents no detail but destroys none either. Across the 378 gold crops:
-355 upscaled, 21 unchanged, 2 shrunk by 5% from patch-grid rounding. If you ever
-see `STOP`, kill the run.
-
-Three prompt decisions, all in `prompt_for()`:
-
-- Show the model **only the candidates for that crop's coarse class.** A
-  Regulatory crop never sees the Warning options. That is what step 2 bought you
-  — it cuts the decision from 21 ways to at most 13.
-- The coarse class comes from the **human label**, not the detector. In the real
-  pipeline a person fixes it in CVAT at step 2, so that is the honest
-  simulation; feeding the detector's guess (right 91.2% of the time) would leave
-  you unable to say whether a bad score was the VLM's fault or the detector's.
-- Always include **`other_*`** and **`unclear`**, so the model is never forced to
-  guess. Both are scored as wrong, so the headline number stays conservative.
-
-Confidence from agreement across 5 samples is deliberately *not* here: that
-serves step 4's review ordering, not this measurement. Greedy decoding is
-cheaper and reproducible. Add sampling when you have a queue to sort.
-
-## Step 4 — you check the names
-
-`cvat.py` writes the predictions back into a CVAT-importable zip.
-
-Sort by confidence and **review the low-agreement crops first** — that is where
-the errors are. If step 0 came out ≥85%, spot-check the confident ones rather
-than opening all of them.
-
-## Step 5 — copy the answers back
-
-```bash
-python propagate.py --predictions work/predictions.json --tracks work/pass1/tracks.json \
-                    --out work/dataset
-```
-
-**This is where the pipeline pays off.** Sign #17 was seen at 17 px, 40 px and
-98 px. You read it once at 98 px and said "stop". All three sightings now get
-the label `stop`.
-
-You could never have labelled that 17 px crop by hand — you cannot see what it
-is. But the tracker knows it is the same sign, so it gets the right label for
-free. That gives you correct training data for **distant signs**, which is
-exactly what matters for driver assistance, since spotting a sign early is the
-whole point.
+Write those descriptions from a contact sheet of your own crops, **before you
+see any score.** If you write them by looking at what the model got wrong, you
+are tuning on your test set and the number stops meaning anything. Describe
+every class to the same level of detail, including the ones that already work.
 
 ---
 
-## Things the model gets wrong, and what to do about it
-
-Measured on `2026_0912_013522.MP4`, 59 tracks with ≥3 detections.
-
-### The coarse class flips mid-track
-
-The same sign can be called `Warning` at second 8 and `Information` at second 12.
-This happens on **8 of 59 tracks (14%)**.
-
-**It does not hurt you.** The tracker keeps it as one sign anyway — the class
-changes, the ID does not. You confirm the class once at the close-up frame, and
-step 5 overwrites every other sighting with your answer. The flip erases itself.
-
-How often a detection disagrees with its own track's close-up view:
-
-| Sign size | Disagrees |
-|---|---|
-| under 30 px | 2.7% |
-| 30–60 px | **14.7%** ← the confused zone |
-| 60–100 px | 3.6% |
-| **over 100 px** | **0.0%** |
-
-Over 100 px the model never changed its mind once, in 105 detections. The
-close-up frame is a trustworthy judge — it agreed with the whole-track majority
-vote **54 times out of 59**.
-
-Treat a flip as a **warning light**: those signs confused the model, so put them
-at the top of your review pile.
-
-### Confidence lies about small signs
-
-| Sign size | Median confidence |
-|---|---|
-| under 30 px | **0.78** |
-| 30–60 px | 0.90 |
-| over 100 px | 0.88 |
-
-A 20 px sign — a grey smudge you personally cannot identify — still scores 0.78.
-The model is confidently guessing.
-
-**So filter by pixel size, not by confidence.** `if longest_side > 60` is a real
-filter. `if conf > 0.7` would let hundreds of unreadable signs straight into your
-dataset, and you would never see it happen.
-
----
-
-## Decide these before writing any code
-
-1. **The fine class list.** About 8 per coarse class plus an `other_*` fallback,
-   so every crop always has a valid label. Derive it from what is actually in
-   your footage — open the contact sheets in `qa/out/` and count what you really
-   see. A class with three examples in your data is a class that will embarrass
-   you in the results table.
-
-   A starting point to react to, not to accept:
-
-   - **Regulatory:** stop, give_way, no_entry, speed_limit, no_parking,
-     no_left_turn, no_right_turn, no_overtaking, other_regulatory
-   - **Warning:** curve_left, curve_right, crossroads, pedestrian_crossing,
-     school_zone, traffic_signal_ahead, road_narrows, speed_bump, other_warning
-   - **Information:** direction_sign, route_marker, hospital, gas_station,
-     parking, rest_area, bus_stop, distance_marker, other_information
-
-   Information is the fuzziest of the three — check it against real frames first.
-
-2. **Speed limits: one class or eight?** Recommend **one** `speed_limit` class
-   plus a separate numeric attribute. The sign is identical except the number, so
-   splitting it gives you eight thin classes instead of one solid one.
-
-3. **The box convention** (step 2). Write it down before annotating.
-
----
-
-## The check
+## The checks
 
 ```bash
-~/miniconda3/envs/w124-dash-env/bin/python -m pytest test_autolabel.py
+python classify.py selfcheck      # scoring maths, baselines, prompt/parser bugs
+python propagate.py --selfcheck   # sampling, class folding, catch-all resolution
+python cvat.py selfcheck          # IoU round-trip: a nudged box must keep its sign
+python propagate.py --report      # the dataset numbers, without writing anything
 ```
-
-`test_autolabel.py` asserts two things, because these are the places a silent bug
-would corrupt the dataset without anything visibly failing:
-
-1. A round trip (CVAT export → crops → predictions → CVAT zip) puts every label
-   back on the box it came from.
-2. `propagate.py` writes a track's confirmed label onto every frame of that
-   track, and onto no frame of any other track.
 
 ---
 
-## Honest notes on scope
+## Known limitations — state these before an examiner finds them
 
-**How much data this actually gets you.** The existing 419 boxes are close to 419
-*distinct* signs — sampling was sparse enough that only 32 of 827 box pairs in
-consecutive frames overlap at all. Across ~27 fine classes that averages ~15 per
-class, with the tail much thinner than the average. The 16 unlabelled clips at
-~66 signs each should add roughly 1000 more.
-
-**That is enough to train a crop classifier, not a 27-class detector.** A
-classifier needs far less real data per class because you can bootstrap it with
-synthetic signs warped from official templates. Plan on detect-then-classify, not
-one fine-grained detector.
-
-**The cheapest way to get more real data is to drive and record more footage.**
-Two hours on varied roads will do more for your class coverage than another week
-of engineering.
-
-**Boxes outside the reviewed frame are not human-verified.** Only the close-up
-frame gets checked in step 2; the other frames in a track carry model geometry.
-That is an acceptable trade for the volume, but record it as a known limitation
-alongside the existing box-border note.
+* **Only the peak frame is human-verified.** Every other frame in a track
+  carries detector geometry, not a human box. An acceptable trade for the
+  volume, but it is a real caveat.
+* **Boxes are propagated, not re-detected.** If the tracker drifted, the drift
+  is in your labels.
+* **2,456 boxes come from 376 signs.** Always state both. Frames 0.1 s apart are
+  near-duplicates, and a bare frame count overstates the dataset.
+* **The classes `--min-signs` folded away are the gap in your footage.** No
+  amount of engineering fixes it. Drive and record more.
