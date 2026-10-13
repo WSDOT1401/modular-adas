@@ -31,7 +31,7 @@ import pathlib
 import re
 import sys
 
-_repo = pathlib.Path(__file__).resolve().parents[2]
+_repo = pathlib.Path(__file__).resolve().parents[3]
 if (_repo / "classes.py").exists():   # repo layout; in the Colab zip classes.py sits alongside
     sys.path.insert(0, str(_repo))
 import classes  # noqa: E402

@@ -38,7 +38,7 @@ import shutil
 import sys
 import zipfile
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
 import classes  # noqa: E402
 
 # A reviewer needs a word for every verdict, including "this is not a sign".

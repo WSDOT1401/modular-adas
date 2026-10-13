@@ -33,7 +33,7 @@ import sys
 import cv2
 from ultralytics import YOLO
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
 import classes  # noqa: E402
 
 

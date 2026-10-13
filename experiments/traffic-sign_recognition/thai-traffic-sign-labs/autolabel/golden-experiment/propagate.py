@@ -33,7 +33,7 @@ import pathlib
 import random
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
 import classes  # noqa: E402
 
 # Dispositions meaning "a real sign we could not put a fine label on". Their

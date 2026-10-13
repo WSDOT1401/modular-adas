@@ -26,7 +26,7 @@ import re
 import shutil
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
 import classes  # noqa: E402
 
 # Not classes — dispositions. Kept out of classes.py because they never reach a
