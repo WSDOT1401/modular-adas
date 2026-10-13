@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block bar %}
+  <span>every <input id="interval" value="2" size="2" inputmode="decimal"> s</span>
   <span class="tally">{{ picked }} picked — {{ picked - empty }} sign / {{ empty }} empty
     <b class="{{ 'ok' if 35 <= pct <= 45 else 'off' }}">({{ pct }}% empty)</b></span>
 {% endblock %}
@@ -19,7 +20,7 @@
     <td>{% if c.selected %}{{ c.sign }} / {{ c.empty }}{% else %}—{% endif %}</td>
     <td class="acts">
       <button type="button" class="job" data-url="{{ url_for('do_extract', clip=c.name) }}"
-              data-interval="1">extract</button>
+              data-interval>extract</button>
       <button type="button" class="job" data-url="{{ url_for('do_score', clip=c.name) }}"
               {% if not c.extracted %}disabled{% endif %}>score</button>
       <span class="prog"></span>

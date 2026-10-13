@@ -3,10 +3,12 @@
 
     python test_app.py
 
-Guards three things that are easy to break and silent when broken: the flip
+Guards four things that are easy to break and silent when broken: the flip
 semantics (a frame the detector called empty but a human marked as holding a
 sign must reach the batch as "sign"), the path-traversal check on clip names,
-and batch creation writing the manifest the CLI expects.
+batch creation writing the manifest the CLI expects, and that jobs really do
+run one at a time -- sixty concurrent video decoders do not crash, they just
+grind, which is far harder to notice.
 """
 from __future__ import annotations
 
@@ -15,6 +17,8 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import threading
+import time
 
 import cv2
 import numpy as np
@@ -73,8 +77,38 @@ def main():
     assert man == {ids[0]: "sign", ids[1]: "empty", ids[2]: "sign"}, man
     assert c.post("/batch", data={"bid": "bad id!", "clip": [clip]}).status_code == 400
 
+    check_queue()
     shutil.rmtree(tmp)
-    print("ok — routes, flip semantics, traversal guard, batch creation")
+    print("ok — routes, flip semantics, traversal guard, batch creation, "
+          "serialised jobs")
+
+
+def check_queue():
+    """Ticking every clip must not run every clip at once."""
+    live = peak = 0
+    lock = threading.Lock()
+    order = []
+
+    def make(n):
+        def fn(cb):
+            nonlocal live, peak
+            with lock:
+                live += 1
+                peak = max(peak, live)
+            order.append(n)
+            cb(1, 3)
+            time.sleep(0.2)
+            with lock:
+                live -= 1
+        return fn
+
+    ids = [A.start(make(i), f"test clip{i}") for i in range(3)]
+    assert [A.JOBS[i]["state"] for i in ids].count("queued") >= 2
+    assert A.busy_with("clip2") == "test"
+    A.QUEUE.join()
+    assert peak == 1, f"jobs overlapped: peak={peak}"
+    assert order == [0, 1, 2], order
+    assert A.busy_with("clip2") is None
 
 
 if __name__ == "__main__":

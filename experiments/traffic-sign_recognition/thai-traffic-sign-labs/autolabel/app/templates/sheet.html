@@ -15,9 +15,14 @@
   <span class="tally" id="tally"></span>
 {% endblock %}
 {% block body %}
-{% if not scored %}
-<p class="warn">This clip has not been scored yet, so every frame shows an empty
-badge. Go back and press <b>score</b>, or pick by eye and flip as you go.</p>
+{% if busy %}
+<p class="warn">This clip is <b>{{ busy }}</b>ing right now. Badges will stay
+empty until it finishes — reload the page then. An empty badge here does not
+mean "no sign", it means "not looked at yet".</p>
+{% elif not scored %}
+<p class="warn">This clip has not been scored, so every badge is empty and that
+tells you nothing. Go back and press <b>score</b> first, or pick by eye and flip
+as you go.</p>
 {% endif %}
 <div id="grid" class="grid">
   {% for f in items %}

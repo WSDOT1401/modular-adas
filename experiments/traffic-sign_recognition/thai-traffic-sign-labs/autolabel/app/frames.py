@@ -100,6 +100,19 @@ def load_scores(out: pathlib.Path) -> dict:
         return {}
 
 
+_MODELS: dict[str, object] = {}
+
+
+def _model(path):
+    """Load the detector once per process. Re-loading it for every clip costs
+    seconds of dead time each and, worse, a second copy of the weights in RAM."""
+    key = str(path)
+    if key not in _MODELS:
+        from ultralytics import YOLO
+        _MODELS[key] = YOLO(key)
+    return _MODELS[key]
+
+
 def score(out: pathlib.Path, model_path, imgsz=1280, conf=0.25, on_progress=None) -> dict:
     """Run the detector over a clip's frames -> ``scores.json``.
 
@@ -110,13 +123,12 @@ def score(out: pathlib.Path, model_path, imgsz=1280, conf=0.25, on_progress=None
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
     import classes
-    from ultralytics import YOLO
 
     idx = load_index(out)
     if not idx:
         raise RuntimeError("extract this clip first")
     paths = [str(out / "full" / f"{f['id']}.jpg") for f in idx["frames"]]
-    model = YOLO(str(model_path))
+    model = _model(model_path)
     found = {}
     for i, (f, res) in enumerate(zip(idx["frames"],
                                      model.predict(source=paths, imgsz=imgsz, conf=conf,

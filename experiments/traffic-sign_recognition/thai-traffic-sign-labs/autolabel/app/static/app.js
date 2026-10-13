@@ -4,7 +4,9 @@ document.addEventListener('click', async (e) => {
   if (!b) return;
   const prog = b.parentElement.querySelector('.prog');
   const body = new FormData();
-  if (b.dataset.interval) body.append('interval', b.dataset.interval);
+  if (b.dataset.interval !== undefined) {
+    body.append('interval', document.getElementById('interval')?.value || '2');
+  }
   b.disabled = true;
   prog.textContent = ' starting…';
   const r = await fetch(b.dataset.url, { method: 'POST', body });
@@ -12,13 +14,22 @@ document.addEventListener('click', async (e) => {
   const { job } = await r.json();
   const tick = setInterval(async () => {
     const s = await (await fetch('/job/' + job)).json();
-    if (s.state === 'running') {
-      prog.textContent = ` ${s.done}/${s.total || '?'}`;
+    if (s.state === 'queued') {
+      // Jobs run one at a time on purpose; tell the truth about the wait
+      // rather than showing a progress bar that is not moving.
+      prog.textContent = s.ahead ? ` queued (${s.ahead} ahead)` : ' queued';
+    } else if (s.state === 'running') {
+      // total stays 0 while the detector loads -- several seconds of real work
+      // that used to render as a meaningless "0/?".
+      prog.textContent = s.total ? ` ${s.done}/${s.total}` : ' loading model…';
     } else {
       clearInterval(tick);
-      prog.textContent = s.state === 'done' ? ' done — reload' : ' ' + s.error;
-      if (s.state === 'done') location.reload();
-      else b.disabled = false;
+      prog.textContent = s.state === 'done' ? ' done' : ' ' + s.error;
+      if (s.state !== 'done') { b.disabled = false; return; }
+      if (!document.querySelector('.prog:not(:empty)')) return;
+      const pending = [...document.querySelectorAll('.prog')]
+        .some(x => /queued|loading|\d+\/\d+/.test(x.textContent));
+      if (!pending) location.reload();
     }
   }, 700);
 });

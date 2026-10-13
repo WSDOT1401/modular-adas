@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import queue
 import sys
 import threading
 import traceback
@@ -46,6 +47,13 @@ app = Flask(__name__)
 # one human clicking.
 LOCK = threading.Lock()
 JOBS: dict[str, dict] = {}
+
+# Jobs run ONE AT A TIME, through a single worker. Ticking 60 clips used to
+# spawn 60 threads, each decoding 2304x1296 video or holding its own copy of
+# the detector; on a laptop that does not fail cleanly, it just grinds -- two
+# concurrent score jobs measured 3.7 s/frame against 0.55 s/frame alone.
+# ponytail: one worker, because the bottleneck is this machine, not the queue.
+QUEUE: "queue.Queue[tuple[str, object]]" = queue.Queue()
 
 
 # -------------------------------------------------------------------- data --
@@ -93,20 +101,39 @@ def summarise(clip: str, nb: dict) -> dict:
 
 # -------------------------------------------------------------------- jobs --
 
-def start(fn, label: str) -> str:
-    jid = uuid.uuid4().hex[:8]
-    JOBS[jid] = {"label": label, "done": 0, "total": 0, "state": "running", "error": None}
-
-    def run():
+def _worker() -> None:
+    while True:
+        jid, fn = QUEUE.get()
+        job = JOBS[jid]
+        job["state"] = "running"
         try:
-            fn(lambda i, n: JOBS[jid].update(done=i, total=n))
-            JOBS[jid]["state"] = "done"
+            fn(lambda i, n: job.update(done=i, total=n))
+            job["state"] = "done"
         except Exception as exc:                      # noqa: BLE001
             traceback.print_exc()
-            JOBS[jid].update(state="error", error=f"{type(exc).__name__}: {exc}")
+            job.update(state="error", error=f"{type(exc).__name__}: {exc}")
+        QUEUE.task_done()
 
-    threading.Thread(target=run, daemon=True).start()
+
+threading.Thread(target=_worker, daemon=True).start()
+
+
+def start(fn, label: str) -> str:
+    jid = uuid.uuid4().hex[:8]
+    JOBS[jid] = {"label": label, "done": 0, "total": 0, "error": None,
+                 "state": "queued", "ahead": QUEUE.qsize()}
+    QUEUE.put((jid, fn))
     return jid
+
+
+def busy_with(clip: str) -> str | None:
+    """Is a job for this clip queued or running? The contact sheet needs to say
+    so, because a frame nobody has scored yet and a frame with no sign on it
+    look identical -- both show an empty badge."""
+    for j in JOBS.values():
+        if j["state"] in ("queued", "running") and j["label"].endswith(" " + clip):
+            return j["label"].split()[0]
+    return None
 
 
 @app.get("/job/<jid>")
@@ -165,7 +192,8 @@ def sheet(clip: str):
         "flipped": f["id"] in flip,
     } for f in idx["frames"]]
     return render_template("sheet.html", clip=clip, items=items,
-                           scored=bool(scores), interval=idx["interval_s"])
+                           scored=bool(scores), interval=idx["interval_s"],
+                           busy=busy_with(clip))
 
 
 @app.post("/clip/<clip>/selection")
