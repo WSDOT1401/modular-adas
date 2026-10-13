@@ -106,3 +106,4 @@ experiments/traffic-sign_recognition/thai-traffic-sign-labs/qa/out/
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/results/*
 # autolabel scratch
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/work/
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/golden-experiment/work/

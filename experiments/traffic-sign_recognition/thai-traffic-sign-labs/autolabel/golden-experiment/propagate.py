@@ -81,7 +81,39 @@ def fold(labels, min_signs):
             for name, n in signs.items()}
 
 
-def plan(root, step, val_frac, min_signs, seed):
+def unboxed(passes, by_id, tolerate):
+    """Frames holding a real sign that is going to get no box. -> (frames, n_signs)
+
+    ``track.py`` records every track it found; ``gold.py add`` folds in only the
+    ones whose closest view cleared ``--min-best-side``, because there is nothing
+    to label on a 27px smudge. Correct for labelling -- but those dropped tracks
+    are still signs standing in the frame, and a frame is one training image. A
+    sign in it with no box is a *positive* example of "not a sign", so the gold
+    workspace alone cannot tell you which frames are safe to use.
+
+    For a dataset whose entire claim is early detection at distance, teaching that
+    lesson is backwards, so frames with such a sign are dropped.
+
+    ``tolerate`` is the size below which we accept the lie rather than pay for it.
+    The detector barely registers a sign under ~30px -- it disagrees with its own
+    track 2.7% of the time there, against 14.7% in the 30-60px band -- so those
+    frames cost real data to fix nearly nothing.
+    """
+    seen, out, n = set(), set(), 0
+    for f in passes:
+        for t in json.loads(f.read_text()):
+            k = (t["clip"], t["track_id"])
+            if t.get("labelable") or t.get("crop_id") in by_id or k in seen:
+                continue
+            seen.add(k)                      # a clip tracked twice must not count twice
+            hits = {(t["clip"], m["frame"]) for m in t["members"] if m["size"] >= tolerate}
+            if hits:
+                n += 1
+                out |= hits
+    return out, n
+
+
+def plan(root, step, val_frac, min_signs, seed, tolerate=30, pass_dirs=None):
     """Decide everything before touching a video file. Pure, so --report is free."""
     tracks = json.loads((root / "tracks.json").read_text())
     key = {r["crop_id"]: r["label"]
@@ -104,6 +136,15 @@ def plan(root, step, val_frac, min_signs, seed):
         if cid in by_id:
             bad |= {(by_id[cid]["clip"], m["frame"]) for m in by_id[cid]["members"]}
 
+    # The sub-threshold tracks live only in the track.py output dirs, never in the
+    # gold workspace -- so this check is impossible without them.
+    passes = sorted(root.parent.glob("pass*/tracks.json")) if pass_dirs is None else \
+        [p / "tracks.json" if p.is_dir() else p for p in pass_dirs]
+    passes = [p for p in passes if p.exists()]
+    unb, n_unb = unboxed(passes, by_id, tolerate) if passes else (set(), 0)
+    n_before = len(bad)
+    bad |= unb
+
     remap = fold(labelled, min_signs)
 
     # track -> split, stratified so a thin class does not land entirely in val
@@ -119,6 +160,7 @@ def plan(root, step, val_frac, min_signs, seed):
         split.update({c: ("val" if i < n_val else "train") for i, c in enumerate(cids)})
 
     raw = 0
+    lost = collections.Counter()             # why a sampled box never made it
     frames = collections.defaultdict(list)   # (clip, frame) -> [(cid, name, xyxy)]
     for cid, lab in labelled.items():
         t = by_id.get(cid)
@@ -129,6 +171,11 @@ def plan(root, step, val_frac, min_signs, seed):
             fk = (t["clip"], d["frame"])
             if fk not in bad:
                 frames[fk].append((cid, remap[lab], d["xyxy"]))
+            else:
+                # count what the exclusions actually cost the dataset, not how many
+                # frames of raw video they touch -- most of those were never sampled
+                lost["unnameable sign in frame" if fk in unb else
+                     "unlabelled disposition"] += 1
 
     # A frame can hold signs from two tracks. If those tracks fell on opposite
     # sides of the split there is no side the frame can go without leaking one
@@ -147,8 +194,9 @@ def plan(root, step, val_frac, min_signs, seed):
         "names": names, "idx": {n: i for i, n in enumerate(names)},
         "frames": keep, "split": split, "remap": remap, "by_class": by_class,
         "n_tracks": len(tracks), "n_signs": len(labelled),
-        "n_blocked": len(blocked), "n_background": len(tracks) - len(key) - len(blocked & set(by_id) - set(key)),
-        "raw": raw, "conflict": conflict, "bad_frames": len(bad),
+        "n_blocked": len(blocked), "raw": raw, "conflict": conflict,
+        "bad_frames": n_before, "n_unboxed": n_unb, "lost": lost,
+        "passes": passes, "tolerate": tolerate,
     }
 
 
@@ -164,9 +212,19 @@ def report(p):
     print(f"  frames: {per_split['train']} train / {per_split['val']} val"
           + (f"   ({p['conflict']} dropped: train+val signs share the frame)"
              if p["conflict"] else ""))
-    print(f"  excluded: {p['n_blocked']} unnameable signs ({p['bad_frames']} frames), "
-          f"{p['n_tracks'] - p['n_signs'] - p['n_blocked']} not_a_sign tracks kept as "
-          f"unlabelled background\n")
+    print(f"  {p['n_tracks'] - p['n_signs'] - p['n_blocked']} not_a_sign tracks kept as "
+          f"unlabelled background (the detector's own false positives)")
+    if p["passes"]:
+        print(f"  dropped {p['lost']['unnameable sign in frame']} boxes on frames holding "
+              f"one of {p['n_unboxed']} signs too far to name but >= {p['tolerate']}px — "
+              f"a sign with no box\n  trains the detector to ignore it "
+              f"(raise --tolerate-under to keep them)")
+    else:
+        print("  !! no work/pass*/tracks.json found, so frames holding an unnameable\n"
+              "     sign could NOT be excluded. Those signs sit in the training images\n"
+              "     with no box, teaching the detector that distant signs are background.\n"
+              "     Pass --passes <track.py output dir> to fix this.")
+    print()
 
     n_box = collections.Counter(n for n, _s in boxes)
     n_sign = {n: len(c) for n, c in p["by_class"].items()}
@@ -246,6 +304,31 @@ def selfcheck():
     assert r["speed_limit"] == "speed_limit", r    # 9 signs -> kept
     # a catch-all is never folded into itself, however thin it is
     assert fold({"x": "information"}, min_signs=99)["information"] == "information"
+
+    # --- unboxed: the check that stops distant signs becoming "background" ---
+    import tempfile
+    def track(tid, labelable, sizes, crop_id=None):
+        return {"clip": "c", "track_id": tid, "labelable": labelable,
+                "crop_id": crop_id,
+                "members": [{"frame": f, "size": s} for f, s in enumerate(sizes)]}
+
+    with tempfile.TemporaryDirectory() as d:
+        f = pathlib.Path(d) / "tracks.json"
+        f.write_text(json.dumps([
+            track(1, True, [80, 90], "c_t0001"),   # labelled: gets a box, never "bad"
+            track(2, False, [20, 45]),             # unnameable: 45px frame must be dropped
+            track(3, False, [10, 12]),             # unnameable but tiny: tolerated
+        ]))
+        by_id = {"c_t0001": {}}
+        bad, n = unboxed([f], by_id, tolerate=30)
+        assert bad == {("c", 1)}, bad      # only the 45px frame, not the 20px one
+        assert n == 1, n
+        # tolerate=0 drops every frame holding any unnameable sign
+        assert unboxed([f], by_id, 0)[0] == {("c", 0), ("c", 1)}
+        # tolerate above the largest tolerates everything -> the old, broken behaviour
+        assert unboxed([f], by_id, 999) == (set(), 0)
+        # the same clip listed in two pass dirs must not be counted twice
+        assert unboxed([f, f], by_id, 30)[1] == 1
     print("ok")
 
 
@@ -261,6 +344,12 @@ def main():
     p.add_argument("--val-frac", type=float, default=0.20)
     p.add_argument("--min-signs", type=int, default=5,
                    help="classes with fewer distinct signs fold into their catch-all")
+    p.add_argument("--tolerate-under", type=int, default=30, metavar="PX",
+                   help="allow an unnameable sign this small to sit unboxed in a kept "
+                        "frame; drop frames holding a bigger one (0 = drop them all)")
+    p.add_argument("--passes", type=pathlib.Path, nargs="*", metavar="DIR",
+                   help="track.py output dirs holding the sub-threshold tracks "
+                        "(default: work/pass*/ next to --dir)")
     p.add_argument("--img-width", type=int, default=1280)
     p.add_argument("--seed", type=int, default=0)
     a = p.parse_args()
@@ -270,7 +359,8 @@ def main():
     if not a.out and not a.report:
         p.error("need --out or --report")
 
-    plan_ = plan(a.dir, a.size_step, a.val_frac, a.min_signs, a.seed)
+    plan_ = plan(a.dir, a.size_step, a.val_frac, a.min_signs, a.seed,
+                 a.tolerate_under, a.passes)
     report(plan_)
     if a.out:
         extract(plan_, a.dir, a.footage, a.out, a.img_width)

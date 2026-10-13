@@ -12,7 +12,7 @@ detector weights and it builds the dataset for your country. See
 | **Input** | dashcam clips + a coarse sign detector you already trained |
 | **Output** | a YOLO dataset (`images/`, `labels/`, `data.yaml`) with fine classes |
 | **Human cost** | one click per *sign*, not per *frame* |
-| **Measured on 35 Thai clips** | 376 signs reviewed by hand → 2,456 labelled boxes |
+| **Measured on 35 Thai clips** | 376 signs reviewed by hand → 2,254 labelled boxes |
 
 Measured numbers for this dataset live in **[RESULTS.md](RESULTS.md)**.
 Why it is built this way, and what we tried that failed, lives in
@@ -47,7 +47,7 @@ exactly what matters for driver assistance, where seeing a sign early is the
 whole point.
 
 ```
-one human click  ──►  6.5 labelled boxes, at every distance   (measured)
+one human click  ──►  6.0 labelled boxes, at every distance   (measured)
 ```
 
 ---
@@ -412,8 +412,8 @@ This is where the pipeline pays off. A sign seen at 17 px, 40 px and 98 px was
 read once at 98 px. All three sightings now carry the right label.
 
 ```
-  376 labelled signs   18400 raw detections -> 2456 boxes on 2291 frames   (6.5x per sign)
-  frames: 1841 train / 450 val   (87 dropped: train+val signs share the frame)
+  376 labelled signs   18400 raw detections -> 2254 boxes on 2107 frames   (6.0x per sign)
+  frames: 1704 train / 403 val   (75 dropped: train+val signs share the frame)
 
   class                   signs  val   boxes
   information               202   40    1381
@@ -438,6 +438,11 @@ yolo detect train data=work/dataset/data.yaml model=yolo11n.pt imgsz=1280 epochs
 * **`not_a_sign` boxes stay unlabelled on purpose** — those are your detector's
   own false positives, and leaving them in the image with no box is how it
   learns to stop firing on them.
+* **Frames holding a sign too far away to name are dropped.** Those signs never
+  reach the gold workspace (there is nothing to label on a 27px smudge), so
+  `propagate.py` also reads `work/pass*/tracks.json` to find them. A sign sitting
+  in a training image with no box is a positive example of *not a sign* — the
+  exact opposite of what an early-detection dataset should teach.
 
 **The knobs:**
 
@@ -446,6 +451,8 @@ yolo detect train data=work/dataset/data.yaml model=yolo11n.pt imgsz=1280 epochs
 | `--size-step` | `0.20` | keep a box once it has changed size by 20%. Lower = more near-duplicate frames, not more information |
 | `--min-signs` | `5` | a class backed by fewer distinct signs folds into its `other_*` catch-all |
 | `--val-frac` | `0.20` | share of *signs* (not frames) held out |
+| `--tolerate-under` | `30` | an unnameable sign smaller than this may sit unboxed in a kept frame; a bigger one drops the frame |
+| `--passes` | `work/pass*/` | where to find the sub-threshold tracks |
 
 **`--min-signs` is the honest one.** A class with one distinct sign cannot be
 learned (the model memorises that one signpost) and cannot be evaluated (one
@@ -555,7 +562,10 @@ python propagate.py --report      # the dataset numbers, without writing anythin
   volume, but it is a real caveat.
 * **Boxes are propagated, not re-detected.** If the tracker drifted, the drift
   is in your labels.
-* **2,456 boxes come from 376 signs.** Always state both. Frames 0.1 s apart are
+* **2,254 boxes come from 376 signs.** Always state both. Frames 0.1 s apart are
   near-duplicates, and a bare frame count overstates the dataset.
+* **Signs under 30px may sit unboxed in a training image.** `--tolerate-under`
+  trades data volume against that lie; at the default it costs 229 boxes to fix.
+  Set it to 0 if you would rather have none of it.
 * **The classes `--min-signs` folded away are the gap in your footage.** No
   amount of engineering fixes it. Drive and record more.

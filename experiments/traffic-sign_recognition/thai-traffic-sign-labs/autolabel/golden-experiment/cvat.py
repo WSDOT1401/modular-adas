@@ -82,19 +82,36 @@ def iou(a, b):
 def cmd_export(args):
     from PIL import Image  # only to read frame size; no decode of video needed
 
-    tracks = [t for t in json.loads(args.tracks.read_text()) if t.get("crop_id")]
+    every = json.loads(args.tracks.read_text())
+    tracks = [t for t in every if t.get("crop_id")]
     pred = read_labels(args.pred) if args.pred and args.pred.exists() else {}
 
     idx = {n: i for i, n in enumerate(NAMES)}
-    by_frame = collections.defaultdict(list)
-    for t in tracks:
+
+    def label_of(t):
         # No prediction (or an unparseable one) falls back to the parent's
         # catch-all rather than being dropped: a box that is not in the task is a
         # sign nobody reviews, which is the one outcome worth avoiding.
-        lab = pred.get(t["crop_id"], "")
-        if lab not in idx:
-            lab = catch_all(t["coarse"])
-        by_frame[f"{t['clip']}_f{t['peak']['frame']:06d}"].append((lab, t["peak"]["xyxy"]))
+        lab = pred.get(t.get("crop_id") or "", "")
+        return lab if lab in idx else catch_all(t["coarse"])
+
+    # One frame per labelable track: its peak, the closest look at that sign.
+    want = {f"{t['clip']}_f{t['peak']['frame']:06d}" for t in tracks}
+
+    # ...but a frame is a whole picture, and other signs are standing in it. Draw
+    # every track visible on that frame, not only the one that peaks there.
+    # Otherwise a reviewer sees an obvious unboxed sign and redraws it by hand --
+    # work that `import` then throws away, because an added box has no track
+    # behind it. Measured on pass3: 38% of frames showed a sign with no box, and
+    # 36 of those 46 signs were already in the task on another frame.
+    by_frame = collections.defaultdict(list)
+    for t in every:
+        lab = label_of(t)
+        for m in t["members"]:
+            stem = f"{t['clip']}_f{m['frame']:06d}"
+            if stem in want:
+                by_frame[stem].append((lab, m["xyxy"]))
+    context = sum(len(v) for v in by_frame.values()) - len(tracks)
 
     stage = args.out.with_suffix("")
     shutil.rmtree(stage, ignore_errors=True)
@@ -124,8 +141,11 @@ def cmd_export(args):
 
     n_pred = sum(1 for t in tracks if pred.get(t["crop_id"]) in idx)
     print(f"{args.out}: {written} frames, {sum(len(b) for b in by_frame.values())} boxes")
-    print(f"  {n_pred} pre-filled from {args.pred}, "
+    print(f"  {len(tracks)} signs to review — {n_pred} pre-filled from {args.pred}, "
           f"{len(tracks)-n_pred} fell back to their coarse catch-all")
+    print(f"  + {context} context boxes: the same sign seen on another sign's frame, "
+          f"or one too\n    far to name. Each is reviewed on its own frame; "
+          f"import takes that verdict.")
     if missing:
         print(f"  !! {len(missing)} frames not found in {args.frames} — skipped")
     print(f"\nIn CVAT: new task -> upload this zip -> Import annotations -> "
@@ -136,10 +156,22 @@ def cmd_export(args):
 def cmd_import(args):
     from PIL import Image
 
-    tracks = [t for t in json.loads(args.tracks.read_text()) if t.get("crop_id")]
+    every = json.loads(args.tracks.read_text())
+    tracks = [t for t in every if t.get("crop_id")]
     peaks = collections.defaultdict(list)
     for t in tracks:
         peaks[f"{t['clip']}_f{t['peak']['frame']:06d}"].append(t)
+
+    # Export draws every sign visible on a frame, not just the one peaking there.
+    # Those context boxes must be matched and consumed, or each would be counted
+    # as a sign the reviewers added -- turning a correct export into a fake
+    # false-negative rate.
+    seen_on = collections.defaultdict(list)
+    for t in every:
+        for m in t["members"]:
+            stem = f"{t['clip']}_f{m['frame']:06d}"
+            if stem in peaks and t.get("crop_id") not in {x.get("crop_id") for x in peaks[stem]}:
+                seen_on[stem].append(m["xyxy"])
 
     rows, added, skipped = [], 0, 0
     with zipfile.ZipFile(args.zip) as z:
@@ -180,6 +212,17 @@ def cmd_import(args):
                     used.add(best)
                 else:
                     rows.append((t["crop_id"], "not_a_sign"))
+
+            # consume the context boxes before counting what is left as new
+            for cx in seen_on.get(stem, []):
+                mine = (cx[0]/W, cx[1]/H, cx[2]/W, cx[3]/H)
+                best, score = None, 0.0
+                for i, (_lab, b) in enumerate(boxes):
+                    s = iou(mine, b)
+                    if i not in used and s > score:
+                        best, score = i, s
+                if best is not None and score >= args.iou:
+                    used.add(best)
             added += len(boxes) - len(used)
 
     with args.out.open("w", newline="") as fh:

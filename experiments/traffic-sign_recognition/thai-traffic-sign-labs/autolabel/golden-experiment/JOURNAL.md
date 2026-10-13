@@ -259,6 +259,87 @@ actually had to get through.
 
 ---
 
+## The gold workspace is a filtered view, and propagate.py did not know
+
+Asked why `--skip-done` points at `work/gold/tracks.json`, the answer is dull —
+it is the union of every pass, so it is the only file that knows all 35 clips.
+Checking it turned up something that was not dull.
+
+```
+pass1 + pass2:  886 tracks
+work/gold:      458 tracks   <- only the ones a human could name
+```
+
+`gold.py add` drops tracks whose closest view is under `--min-best-side 60`.
+Correct: there is nothing to label on a 27px smudge. But `propagate.py` read
+only the gold workspace, so **428 real signs were invisible to it** — and a
+frame is one training image:
+
+```
+frames going into the dataset that contain an UNLABELLED real sign: 413 of 2291 (18%)
+their size: median 27px, p90 46px, max 59px
+```
+
+YOLO reads empty space as a correct answer. 18% of the dataset was teaching the
+detector that distant signs are background — the exact opposite of the claim the
+whole pipeline rests on, that tracking buys correct labels for signs at a
+distance.
+
+**The fix** has `propagate.py` read `work/pass*/tracks.json` as well, and drop
+frames holding an unnameable sign at or above `--tolerate-under` (default 30px).
+
+The threshold comes from the detector-behaviour table above: below 30px it
+disagrees with its own track 2.7% of the time because it is barely registering
+the sign at all; in the 30-60px band that jumps to 14.7% — clearly seen, not
+nameable. Those are the ones where the lie costs something.
+
+| `--tolerate-under` | boxes | vs. broken |
+|---|---|---|
+| 0 (drop every affected frame) | 1,997 | -18.7% |
+| **30 (default)** | **2,254** | **-8.2%** |
+| 999 (the old behaviour) | 2,456 | — |
+
+The headline number went 2,456 → **2,254 boxes on 2,107 frames**, still from 376
+signs. Worth reporting the corrected figure rather than the inflated one.
+
+**The generalisable bit:** a file that is correct for one job is not therefore
+correct for the next one. `tracks.json` in the gold workspace is a *labelling*
+queue, and reusing it as a *dataset* manifest silently inherited its filter.
+`--report` now warns loudly when it cannot find the pass dirs, because the
+failure is otherwise invisible — you just get a slightly worse model.
+
+---
+
+## The same bug twice: a frame is a picture, not a row
+
+`propagate.py` had it (signs too far to name, sitting unboxed in a training
+image). Then `cvat.py export` turned out to have it too, in a different costume.
+
+Export grouped boxes by each track's **peak frame** and drew only the track that
+peaked there. But a frame is a whole picture: other signs are standing in it at
+non-peak moments, and they got no box. Measured on pass3:
+
+```
+40 of 104 exported frames (38%) showed a sign with no box
+  36 of those signs were labelable -- already in the task, on their own frame
+  10 were sub-threshold -- never reviewed anywhere
+```
+
+For a human reviewer this is worse than for a model. They see an obvious 222px
+sign with no box, assume the tool missed it, and draw it by hand -- work that
+`import` then discards, because an added box has no track to propagate along.
+
+Fixed by drawing every track visible on an exported frame. `import` then has to
+match and *consume* those context boxes before counting leftovers, or each one
+would register as a sign the reviewers added and fake a false-negative rate.
+
+**The pattern worth remembering:** both bugs came from treating a frame as a row
+in a table (one track, one record) when it is really a picture (everything
+visible in it is part of the label). Any time a frame is reused as a unit of
+output, ask what else is standing in it.
+
+---
+
 ## Scoping decisions worth remembering
 
 **`test_autolabel.py` was deleted, not fixed.** It tested five `track.py`
