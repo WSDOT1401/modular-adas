@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block bar %}
+  <span class="tally">{{ picked }} picked — {{ picked - empty }} sign / {{ empty }} empty
+    <b class="{{ 'ok' if 35 <= pct <= 45 else 'off' }}">({{ pct }}% empty)</b></span>
+{% endblock %}
+{% block body %}
+<form method="post" action="{{ url_for('make_batch') }}">
+<table>
+  <tr><th></th><th>clip</th><th>frames</th><th>scored</th><th>picked</th>
+      <th>sign / empty</th><th></th></tr>
+  {% for c in clips %}
+  <tr>
+    <td><input type="checkbox" name="clip" value="{{ c.name }}"
+               {% if not c.selected %}disabled{% endif %}></td>
+    <td><a href="{{ url_for('sheet', clip=c.name) }}">{{ c.name }}</a></td>
+    <td>{{ c.extracted or '—' }}</td>
+    <td>{{ c.scored or '—' }}</td>
+    <td>{{ c.selected or '—' }}</td>
+    <td>{% if c.selected %}{{ c.sign }} / {{ c.empty }}{% else %}—{% endif %}</td>
+    <td class="acts">
+      <button type="button" class="job" data-url="{{ url_for('do_extract', clip=c.name) }}"
+              data-interval="1">extract</button>
+      <button type="button" class="job" data-url="{{ url_for('do_score', clip=c.name) }}"
+              {% if not c.extracted %}disabled{% endif %}>score</button>
+      <span class="prog"></span>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" class="empty">No videos in <code>{{ footage }}</code>. Drop some in and reload.</td></tr>
+  {% endfor %}
+</table>
+<p class="make">
+  Tick the clips you picked from, then
+  <input name="bid" placeholder="b01" size="6" pattern="[A-Za-z0-9]+" required>
+  <button>Create batch</button>
+</p>
+</form>
+{% endblock %}

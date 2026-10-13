@@ -107,3 +107,10 @@ experiments/traffic-sign_recognition/thai-traffic-sign-labs/results/*
 # autolabel scratch
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/work/
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/golden-experiment/work/
+# autolabel pipeline: raw footage, the regenerable frame+score cache, the
+# batches (images) and the built dataset. app/notebook.json is NOT ignored --
+# it records which frames a human picked, which is real dataset provenance.
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/app/footage/
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/app/workspace/
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/batches/
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/dataset/

@@ -1,0 +1,108 @@
+// Homepage: extract / score run off-thread on the server, so poll for progress.
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button.job');
+  if (!b) return;
+  const prog = b.parentElement.querySelector('.prog');
+  const body = new FormData();
+  if (b.dataset.interval) body.append('interval', b.dataset.interval);
+  b.disabled = true;
+  prog.textContent = ' starting…';
+  const r = await fetch(b.dataset.url, { method: 'POST', body });
+  if (!r.ok) { prog.textContent = ' ' + (await r.text()).slice(0, 80); b.disabled = false; return; }
+  const { job } = await r.json();
+  const tick = setInterval(async () => {
+    const s = await (await fetch('/job/' + job)).json();
+    if (s.state === 'running') {
+      prog.textContent = ` ${s.done}/${s.total || '?'}`;
+    } else {
+      clearInterval(tick);
+      prog.textContent = s.state === 'done' ? ' done — reload' : ' ' + s.error;
+      if (s.state === 'done') location.reload();
+      else b.disabled = false;
+    }
+  }, 700);
+});
+
+function startSheet(clip) {
+  const grid = document.getElementById('grid');
+  const cells = [...grid.querySelectorAll('.cell')];
+  const tally = document.getElementById('tally');
+  let filter = 'all', last = null, timer = null;
+
+  // The detector proposes; a flip overrules it. We store the flip, not the
+  // answer, so both opinions survive into the batch.
+  const isSign = (c) => (+c.dataset.boxes > 0) !== (c.dataset.flipped === '1');
+
+  function paint() {
+    let sign = 0, empty = 0;
+    for (const c of cells) {
+      const s = isSign(c);
+      c.dataset.sign = s ? '1' : '0';
+      c.querySelector('.badge').textContent =
+        c.dataset.flipped === '1' ? (s ? 'sign' : 'none') : (c.dataset.boxes || '–');
+      c.classList.toggle('hide', filter !== 'all' && (filter === 'sign') !== s);
+      if (c.classList.contains('picked')) s ? sign++ : empty++;
+    }
+    const n = sign + empty;
+    const pct = n ? Math.round(100 * empty / n) : 0;
+    const good = pct >= 35 && pct <= 45;
+    tally.innerHTML = n
+      ? `picked ${n} — ${sign} sign / ${empty} empty ` +
+        `<b class="${good ? 'ok' : 'off'}">(${pct}% empty${good ? ' ✓' : ''})</b>`
+      : 'nothing picked yet';
+  }
+
+  function save() {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      fetch(`/clip/${encodeURIComponent(clip)}/selection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selected: cells.filter(c => c.classList.contains('picked')).map(c => c.dataset.id),
+          flipped: cells.filter(c => c.dataset.flipped === '1').map(c => c.dataset.id),
+        }),
+      });
+    }, 400);
+  }
+
+  grid.addEventListener('click', (e) => {
+    const cell = e.target.closest('.cell');
+    if (!cell) return;
+    if (e.target.closest('.badge')) {
+      cell.dataset.flipped = cell.dataset.flipped === '1' ? '0' : '1';
+      paint(); save();
+      return;
+    }
+    const i = cells.indexOf(cell);
+    if (e.shiftKey && last !== null) {
+      const want = cell.classList.contains('picked');
+      for (let k = Math.min(i, last); k <= Math.max(i, last); k++) {
+        if (!cells[k].classList.contains('hide')) cells[k].classList.toggle('picked', !want);
+      }
+    } else {
+      cell.classList.toggle('picked');
+    }
+    last = i;
+    paint(); save();
+  });
+
+  document.querySelectorAll('button.f').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('button.f').forEach(x => x.classList.toggle('on', x === b));
+    filter = b.dataset.f;
+    paint();
+  }));
+
+  const setZ = (px) => document.documentElement.style.setProperty('--cell', px + 'px');
+  document.querySelectorAll('button.z').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('button.z').forEach(x => x.classList.toggle('on', x === b));
+    setZ(b.dataset.z);
+    try { localStorage.setItem('cell', b.dataset.z); } catch {}
+  }));
+  try {
+    const z = localStorage.getItem('cell');
+    if (z) document.querySelector(`button.z[data-z="${z}"]`)?.click();
+  } catch {}
+
+  paint();
+}

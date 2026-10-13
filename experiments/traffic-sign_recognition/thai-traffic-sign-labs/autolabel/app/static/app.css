@@ -1,0 +1,41 @@
+:root { --bg:#14161a; --fg:#e8eaed; --dim:#8b929c; --line:#2a2f37;
+        --sign:#f2a54a; --empty:#4a9df2; --ok:#5ec27e; --off:#d9655b; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+header { position:sticky; top:0; z-index:5; display:flex; gap:18px; align-items:center;
+         flex-wrap:wrap; padding:10px 16px; background:#1a1d23; border-bottom:1px solid var(--line); }
+.home { color:var(--fg); text-decoration:none; font-weight:700; }
+main { padding:16px; }
+a { color:var(--empty); }
+button { font:inherit; background:#232833; color:var(--fg); border:1px solid var(--line);
+         border-radius:5px; padding:3px 9px; cursor:pointer; }
+button:hover:not(:disabled) { border-color:#4a515e; }
+button:disabled { opacity:.35; cursor:default; }
+button.on { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+.tally b.ok { color:var(--ok); } .tally b.off { color:var(--off); }
+.dim, .prog { color:var(--dim); }
+
+table { border-collapse:collapse; width:100%; max-width:980px; }
+th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); }
+th { color:var(--dim); font-weight:400; }
+td.acts { white-space:nowrap; }
+td.empty { color:var(--dim); padding:24px 10px; }
+.make { margin-top:18px; }
+.make input { font:inherit; background:#232833; color:var(--fg);
+              border:1px solid var(--line); border-radius:5px; padding:3px 7px; }
+.warn { color:var(--sign); max-width:60ch; }
+
+.grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fill, minmax(var(--cell,440px), 1fr)); }
+figure.cell { margin:0; position:relative; border:3px solid transparent; border-radius:6px;
+              overflow:hidden; cursor:pointer; background:#0e1013; }
+figure.cell.picked { border-color:var(--ok); }
+figure.cell.hide { display:none; }
+figure.cell img { display:block; width:100%; height:auto; }
+figcaption { position:absolute; left:0; bottom:0; padding:1px 6px; font-size:12px;
+             color:var(--fg); background:#000a; }
+.badge { position:absolute; top:6px; right:6px; min-width:30px; padding:2px 7px;
+         font-weight:700; background:#000b; border-color:#0000; }
+figure.cell[data-sign="1"] .badge { color:var(--sign); }
+figure.cell[data-sign="0"] .badge { color:var(--dim); }
+figure.cell[data-flipped="1"] .badge { outline:2px solid var(--off); }

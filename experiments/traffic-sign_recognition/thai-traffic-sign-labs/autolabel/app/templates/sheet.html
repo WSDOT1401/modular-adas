@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ clip }}{% endblock %}
+{% block bar %}
+  <span class="clip">{{ clip }} · every {{ interval }}s</span>
+  <span class="filters">
+    <button class="f on" data-f="all">all</button>
+    <button class="f" data-f="sign">has sign</button>
+    <button class="f" data-f="empty">empty</button>
+  </span>
+  <span class="sizes">
+    <button class="z" data-z="320">S</button>
+    <button class="z on" data-z="440">M</button>
+    <button class="z" data-z="640">L</button>
+  </span>
+  <span class="tally" id="tally"></span>
+{% endblock %}
+{% block body %}
+{% if not scored %}
+<p class="warn">This clip has not been scored yet, so every frame shows an empty
+badge. Go back and press <b>score</b>, or pick by eye and flip as you go.</p>
+{% endif %}
+<div id="grid" class="grid">
+  {% for f in items %}
+  <figure class="cell{% if f.picked %} picked{% endif %}"
+          data-id="{{ f.id }}" data-boxes="{{ f.boxes }}"
+          data-flipped="{{ 1 if f.flipped else 0 }}">
+    <img loading="lazy" src="{{ url_for('img', kind='thumb', clip=clip, fid=f.id) }}">
+    <button class="badge" title="click if the detector got this wrong"></button>
+    <figcaption>{{ '%.0f'|format(f.t) }}s</figcaption>
+  </figure>
+  {% endfor %}
+</div>
+{% endblock %}
+{% block js %}
+<script>startSheet({{ clip|tojson }});</script>
+{% endblock %}
