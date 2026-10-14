@@ -127,10 +127,29 @@ def score(out: pathlib.Path, model_path, imgsz=1280, conf=0.25, on_progress=None
     idx = load_index(out)
     if not idx:
         raise RuntimeError("extract this clip first")
-    paths = [str(out / "full" / f"{f['id']}.jpg") for f in idx["frames"]]
+
+    # Keep what this same model already decided and score only the gaps. A clip
+    # that gained ten frames should cost ten frames of work, not two hundred.
+    # A DIFFERENT model means every verdict is stale, so start clean.
+    prev, old_model = {}, None
+    sp = out / "scores.json"
+    if sp.exists():
+        try:
+            blob = json.loads(sp.read_text())
+            old_model, prev = blob.get("model"), blob.get("frames", {})
+        except json.JSONDecodeError:
+            pass
+    found = dict(prev) if old_model == str(model_path) else {}
+
+    todo = [f for f in idx["frames"] if f["id"] not in found]
+    if not todo:
+        if on_progress:
+            on_progress(len(idx["frames"]), len(idx["frames"]))
+        return found
+
+    paths = [str(out / "full" / f"{f['id']}.jpg") for f in todo]
     model = _model(model_path)
-    found = {}
-    for i, (f, res) in enumerate(zip(idx["frames"],
+    for i, (f, res) in enumerate(zip(todo,
                                      model.predict(source=paths, imgsz=imgsz, conf=conf,
                                                    stream=True, verbose=False)), 1):
         found[f["id"]] = [
@@ -139,7 +158,7 @@ def score(out: pathlib.Path, model_path, imgsz=1280, conf=0.25, on_progress=None
              "conf": round(float(b.conf), 3)}
             for b in res.boxes]
         if on_progress:
-            on_progress(i, len(paths))
+            on_progress(i, len(todo))
     (out / "scores.json").write_text(json.dumps(
         {"model": str(model_path), "imgsz": imgsz, "conf": conf, "frames": found},
         indent=2) + "\n")
