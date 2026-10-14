@@ -59,10 +59,20 @@ QUEUE: "queue.Queue[tuple[str, object]]" = queue.Queue()
 # -------------------------------------------------------------------- data --
 
 def clip_names() -> list[str]:
-    if not FOOTAGE.exists():
-        return []
-    return sorted(p.stem for p in FOOTAGE.iterdir()
-                  if p.suffix.lower() in VIDEO_EXT and not p.name.startswith("."))
+    """Every clip we can pick from -- which is not the same as every video.
+
+    Frames can outlive their video (imported from another workspace, or the
+    source file archived). The workspace is what decides whether a clip is
+    pickable; the video is only needed to extract MORE frames. Listing by video
+    alone silently hid 182 already-picked frames from the homepage, so they
+    could never be ticked into a batch.
+    """
+    vids = {p.stem for p in FOOTAGE.iterdir()
+            if p.suffix.lower() in VIDEO_EXT and not p.name.startswith(".")} \
+        if FOOTAGE.exists() else set()
+    cached = {p.name for p in WORKSPACE.iterdir() if (p / "full").is_dir()} \
+        if WORKSPACE.exists() else set()
+    return sorted(vids | cached)
 
 
 def video_for(clip: str) -> pathlib.Path:
@@ -96,6 +106,8 @@ def summarise(clip: str, nb: dict) -> dict:
         "sign": n_sign,
         "empty": len(sel) - n_sign,
         "state": ("picked" if sel else "scored" if scores else "extracted" if idx else "new"),
+        "has_video": any((FOOTAGE / f"{clip}{e}").exists() or
+                         (FOOTAGE / f"{clip}{e.upper()}").exists() for e in VIDEO_EXT),
     }
 
 

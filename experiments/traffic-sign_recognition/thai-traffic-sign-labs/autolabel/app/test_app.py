@@ -77,6 +77,15 @@ def main():
     assert man == {ids[0]: "sign", ids[1]: "empty", ids[2]: "sign"}, man
     assert c.post("/batch", data={"bid": "bad id!", "clip": [clip]}).status_code == 400
 
+    # Frames can outlive their video. Such a clip must still be listed and
+    # tickable -- listing by video alone once hid 182 picked frames, which could
+    # then never reach a batch.
+    (A.FOOTAGE / f"{clip}.mp4").unlink()
+    assert clip in A.clip_names(), "a clip with frames but no video vanished"
+    page = c.get("/").get_data(as_text=True)
+    assert clip in page and "frames only" in page
+    assert "2 sign / 1 empty" in page, "its picks stopped being counted"
+
     check_queue()
     shutil.rmtree(tmp)
     print("ok — routes, flip semantics, traversal guard, batch creation, "

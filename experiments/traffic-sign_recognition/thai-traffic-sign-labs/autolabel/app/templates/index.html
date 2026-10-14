@@ -13,14 +13,17 @@
   <tr>
     <td><input type="checkbox" name="clip" value="{{ c.name }}"
                {% if not c.selected %}disabled{% endif %}></td>
-    <td><a href="{{ url_for('sheet', clip=c.name) }}">{{ c.name }}</a></td>
+    <td><a href="{{ url_for('sheet', clip=c.name) }}">{{ c.name }}</a>{% if not c.has_video %}
+        <span class="dim" title="frames imported; source video not in footage/">·frames only</span>{% endif %}</td>
     <td>{{ c.extracted or '—' }}</td>
     <td>{{ c.scored or '—' }}</td>
     <td>{{ c.selected or '—' }}</td>
     <td>{% if c.selected %}{{ c.sign }} / {{ c.empty }}{% else %}—{% endif %}</td>
     <td class="acts">
       <button type="button" class="job" data-url="{{ url_for('do_extract', clip=c.name) }}"
-              data-interval>extract</button>
+              data-interval {% if not c.has_video %}disabled
+              title="frames only — no video in footage/, so nothing to re-extract"
+              {% endif %}>extract</button>
       <button type="button" class="job" data-url="{{ url_for('do_score', clip=c.name) }}"
               {% if not c.extracted %}disabled{% endif %}>score</button>
       <span class="prog"></span>
