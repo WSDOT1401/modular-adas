@@ -7,11 +7,12 @@
 {% block body %}
 <form method="post" action="{{ url_for('make_batch') }}">
 <table>
-  <tr><th></th><th>clip</th><th>frames</th><th>scored</th><th>picked</th>
+  <tr><th><input type="checkbox" id="all" title="tick every clip that has picks"></th><th>clip</th><th>frames</th><th>scored</th><th>picked</th>
       <th>sign / empty</th><th></th></tr>
   {% for c in clips %}
   <tr>
     <td><input type="checkbox" name="clip" value="{{ c.name }}"
+               data-n="{{ c.selected }}" data-empty="{{ c.empty }}"
                {% if not c.selected %}disabled{% endif %}></td>
     <td><a href="{{ url_for('sheet', clip=c.name) }}">{{ c.name }}</a>{% if not c.has_video %}
         <span class="dim" title="frames imported; source video not in footage/">·frames only</span>{% endif %}</td>
@@ -37,6 +38,7 @@
   Tick the clips you picked from, then
   <input name="bid" placeholder="b01" size="6" pattern="[A-Za-z0-9]+" required>
   <button>Create batch</button>
+  <span class="tally" id="chosen"></span>
 </p>
 </form>
 {% endblock %}

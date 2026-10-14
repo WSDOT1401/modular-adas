@@ -117,3 +117,34 @@ function startSheet(clip) {
 
   paint();
 }
+
+
+// Homepage: tick-all, plus a live total so you know the batch size BEFORE
+// creating it -- the whole point of a batch is that its size is known up front.
+(() => {
+  const all = document.getElementById('all');
+  const chosen = document.getElementById('chosen');
+  if (!all || !chosen) return;
+  const boxes = [...document.querySelectorAll('input[name="clip"]:not([disabled])')];
+
+  function total() {
+    const on = boxes.filter(b => b.checked);
+    const n = on.reduce((a, b) => a + +b.dataset.n, 0);
+    const e = on.reduce((a, b) => a + +b.dataset.empty, 0);
+    const pct = n ? Math.round(100 * e / n) : 0;
+    const good = pct >= 35 && pct <= 45;
+    chosen.innerHTML = n
+      ? `— ${n} frames from ${on.length} clips, ${n - e} sign / ${e} empty ` +
+        `<b class="${good ? 'ok' : 'off'}">(${pct}% empty)</b>`
+      : '';
+    all.checked = on.length === boxes.length && boxes.length > 0;
+    all.indeterminate = on.length > 0 && on.length < boxes.length;
+  }
+
+  all.addEventListener('change', () => {
+    boxes.forEach(b => { b.checked = all.checked; });
+    total();
+  });
+  boxes.forEach(b => b.addEventListener('change', total));
+  total();
+})();
