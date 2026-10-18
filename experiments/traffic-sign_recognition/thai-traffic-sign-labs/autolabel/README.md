@@ -135,13 +135,17 @@ Lost track of where a batch is? `python prelabel.py status`.
 zip -qr b01.zip dataset        # upload to Drive, open train_batch.ipynb on a T4
 ```
 
-The notebook checks the labels before it spends two hours on them — counts per
+The notebook checks the labels before it spends an hour on them — counts per
 class, coordinates in range, and a picture of one frame with its boxes drawn.
 If the boxes are not on the signs, nothing after that matters.
 
-Two settings in there are not defaults: `imgsz=1280` (a sign is 30-60 px in a
-2304x1296 frame) and **`fliplr=0.0`**. A mirrored `turn_left` is a `turn_right`
--- the default 0.5 trains the model to call them the same thing.
+Nothing in the train call is a default. Two are ours: `imgsz=1280` (a sign is
+30-60 px in a 2304x1296 frame) and **`fliplr=0.0`** — a mirrored `turn_left` is
+a `turn_right`, and the default 0.5 trains the model to call them one class.
+The rest is Ultralytics' recipe for a dataset under 1000 images: `AdamW` at
+`lr0=0.001`, `mosaic=0.5`, and `epochs=50` — which is a learning-rate schedule,
+not a budget, so declaring more than you run leaves the rate near `lr0` the
+whole way and the model never gets its refinement phase.
 
 ## More footage later
 

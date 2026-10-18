@@ -138,10 +138,12 @@ plt.show()
 md(r"""
 ## 5. Train
 
-About 1.5–2 hours for 100 epochs on a T4, though `patience=20` usually stops it
-earlier. Re-running this cell after a disconnect resumes from `last.pt`.
+Forty minutes or so on a T4, less if `patience=20` stops it early. Re-running
+this cell after a dropped session carries on from `last.pt`.
 
-Two settings are not defaults and both matter:
+Almost nothing here is a default, and each one has a reason.
+
+**Ours, forced by this dataset:**
 
 - **`fliplr=0.0`** — the default is 0.5, which mirrors half your images.
   A mirrored `turn_left` *is* a `turn_right`, and a mirrored `keep_left` is a
@@ -150,28 +152,51 @@ Two settings are not defaults and both matter:
 - **`imgsz=1280`** — your frames are 2304×1296 and a sign is 30–60 px. At the
   default 640 most of them are gone before the first convolution.
 
-`yolo11n` is the Pi-sized model. Swap in `yolo11s.pt` if you want a better
-number and do not mind roughly double the time — the dataset is the limit here,
-not the architecture.
+**Ultralytics' own recipe for a dataset under 1000 images** (you have ~700) —
+see docs.ultralytics.com/guides/yolo26-training-recipe:
+
+- **`optimizer="AdamW", lr0=0.001`** — `auto` picks for COCO-sized data and
+  steps too far when an epoch is only 87 batches long.
+- **`mosaic=0.5, mixup=0.0, copy_paste=0.0`** — full mosaic stitches four
+  frames into one. On a small set that distorts more than it teaches.
+- **`epochs=50`** — this is a *schedule*, not a budget. The learning rate
+  decays from `lr0` towards `lr0 * lrf` across the number you declare here, so
+  asking for 100 and stopping at 27 means it never came down and the model
+  never got a refinement phase. Declare what you actually intend to run.
+
+`yolo26n` is the Pi-sized one, and the one that can export NMS-free later.
+`yolo26s.pt` buys a few points for roughly double the time — but the dataset is
+the limit here, not the architecture.
 """)
 code(r"""
 import pathlib
+import torch
 from ultralytics import YOLO
 
-PROJECT, NAME = "/content/drive/MyDrive/sign_runs", "b01"
+PROJECT = "/content/drive/MyDrive/thai-traffic-sign-dataset/v1/results"
+NAME = "b01"            # bump to b01-v2 etc. to keep an old run's weights
 last = pathlib.Path(PROJECT) / NAME / "weights/last.pt"
 
-model = YOLO(str(last)) if last.exists() else YOLO("yolo11n.pt")
+# Resume only a run that was actually cut off. A *finished* run leaves last.pt
+# with epoch == -1 (the optimizer gets stripped), and resume=True on that one
+# raises "nothing to resume" -- and when it does resume it restores the args it
+# was started with, silently ignoring every setting you change below.
+unfinished = last.exists() and torch.load(
+    last, map_location="cpu", weights_only=False).get("epoch", -1) >= 0
+
+model = YOLO(str(last)) if unfinished else YOLO("yolo26n.pt")
 model.train(
     data="/content/dataset/data.yaml",
     imgsz=1280,
-    epochs=100,
+    epochs=50,
     patience=20,
     batch=8,
-    fliplr=0.0,
+    optimizer="AdamW", lr0=0.001,           # under 1000 images: do not use auto
+    mosaic=0.5, mixup=0.0, copy_paste=0.0,  # likewise, full mosaic is too much
+    fliplr=0.0,                             # a mirrored turn_left IS turn_right
     seed=0,
     project=PROJECT, name=NAME, exist_ok=True,
-    resume=last.exists(),
+    resume=unfinished,
     plots=True,
 )
 """)
@@ -200,20 +225,16 @@ YOLO(f"{PROJECT}/{NAME}/weights/best.pt").val(
 md(r"""
 ## 7. Take the weights home
 
-They are already in your Drive at `sign_runs/b01/weights/best.pt` — this just
-also drops a copy in your browser.
+They are already in your Drive under
+`thai-traffic-sign-dataset/v1/results/b01/weights/` — this just also drops a
+copy in your browser.
 
-Then point the pipeline at them, and the next batch arrives pre-annotated by a
-model that has seen this one:
-
-```
-# prelabel.py, near the top
-MODEL = HERE / "weights/b01-best.pt"
-```
-
-Re-run **score** in the web app so the contact sheet badges come from the new
-model too. `batch.json` records which weights scored each batch, because an
-accept rate means nothing without knowing what produced it.
+Taking them back into the pipeline is **not** a one-line swap. `prelabel.MODEL`
+feeds `classes.THAI3_NAMES[int(b.cls)]` in two places (`prelabel.py` and
+`app/frames.py`), and that list holds three names. This model emits 21, so it
+would index past the end — or, worse, quietly return `Regulatory` for class 0
+and look like it worked. The map you need already exists as
+`classes.THAI_FINE_PARENT`; both call sites have to go through it first.
 """)
 code(r"""
 from google.colab import files
