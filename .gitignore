@@ -114,3 +114,5 @@ experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/app/footag
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/app/workspace/
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/batches/
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/dataset/
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/*.zip
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/predictions.csv
