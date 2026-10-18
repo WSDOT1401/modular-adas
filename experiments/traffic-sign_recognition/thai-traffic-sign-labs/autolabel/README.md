@@ -129,6 +129,20 @@ python prelabel.py build              # every reviewed batch -> dataset/
 
 Lost track of where a batch is? `python prelabel.py status`.
 
+### 5. Train
+
+```bash
+zip -qr b01.zip dataset        # upload to Drive, open train_batch.ipynb on a T4
+```
+
+The notebook checks the labels before it spends two hours on them — counts per
+class, coordinates in range, and a picture of one frame with its boxes drawn.
+If the boxes are not on the signs, nothing after that matters.
+
+Two settings in there are not defaults: `imgsz=1280` (a sign is 30-60 px in a
+2304x1296 frame) and **`fliplr=0.0`**. A mirrored `turn_left` is a `turn_right`
+-- the default 0.5 trains the model to call them the same thing.
+
 ## More footage later
 
 Same loop, new id. Batch 2 does not disturb batch 1 — `build` always reads every
