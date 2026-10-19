@@ -116,3 +116,6 @@ experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/batches/
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/dataset/
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/*.zip
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/predictions.csv
+experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/results/*
+# ...but the little script that runs the trained model over new footage is code.
+!experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/results/*.py
