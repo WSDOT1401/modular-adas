@@ -219,7 +219,16 @@ qwen_label.py     runs on Colab, inside crops.zip
 build_qwen_nb.py  emits qwen_batch.ipynb, so the notebook diffs like code
 batches/          one folder per batch; everything about it lives inside
 golden-experiment/  the frozen proof-of-concept this grew out of, and its numbers
+footage_manifest.csv  which video every frame came from, after the videos are gone
 ```
+
+The raw videos are too big to keep around, so the manifest is the record. Every
+frame file is named `<clip>_f<N>.jpg`: `N` is the 0-based decoded frame index, so
+its time in the clip is `N / fps`. The manifest pins each clip name to the exact
+video bytes (sha256, size, codec, resolution, fps, duration) and counts how many
+frames each dataset took from it. A video restored from an SD card or backup
+drive is the right one if its sha256 matches. Track crops (`<clip>_t<track>`)
+carry no frame number; `tracks.json` beside them maps each one to its peak frame.
 
 `golden-experiment/` is a different, earlier pipeline: it tracked signs across
 video frames instead of letting a human pick them. It is kept because its
