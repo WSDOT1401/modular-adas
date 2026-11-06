@@ -119,3 +119,12 @@ experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/prediction
 experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/results/*
 # ...but the little script that runs the trained model over new footage is code.
 !experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/results/*.py
+
+# Training logs. NOT a blanket *.txt -- CMakeLists.txt and three
+# requirements.txt are tracked. The runs are not reproducible anyway (synth.py
+# draws new data every epoch); what the logs taught is in the classifier README.
+train_log_*.txt
+
+# Beep/alert audio prototyping: ~20 generated wavs plus a notebook that is
+# still scratch. Promote it out of here when it becomes a service.
+experiments/sign_beep/
