@@ -8,6 +8,11 @@ The W124 integration that uses it lives in [`../w124/`](../w124/).
 |---|---|
 | `protocol/` | The message contract: key names, JSON schema and the UDP publisher (`adas_protocol` Python package). Every producer and consumer agrees on this and nothing else. |
 | `vision/` | The ADAS vision service: camera capture, scheduler, lane departure, traffic signs (signs and most CV stages are still stubs). |
+| `experiments/` | Research and prototypes that feed the modules: object-detection benchmarks, distance estimation, traffic-sign training and the auto-label pipeline. Not run in the car. |
+| `models/` | Model-weight manifests (what to fetch and its checksum; the weights themselves are never committed). |
+| `tests/` | Cross-module tests (end to end; placeholder). Unit tests sit beside the code they test. |
+| `environment.yml` | Conda environment for the experiments (Python + Ultralytics). |
+| `.gitignore`, `.gitattributes` | Ignore rules for weights, datasets and footage, and the Git LFS rule for trained results. |
 
 ## The rule
 
@@ -31,3 +36,5 @@ collision), each chosen by a config line. See
 pip install -e adas/protocol/python      # from the repo root
 pip install -r adas/vision/requirements.txt
 ```
+
+Each experiment has its own `requirements.txt` and README.

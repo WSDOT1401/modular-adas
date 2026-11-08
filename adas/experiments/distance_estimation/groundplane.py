@@ -19,7 +19,7 @@ PITCH_DEG  = -0.5        # downward tilt; 0 = optical axis horizontal
 HFOV_DEG   = 140.0       # horizontal field of view (from the dashcam's spec sheet)
 
 DET_MODEL = "yolo26n.pt"
-VIDEO_IN  = "experiments/distance_estimation/dash2.mp4"   # or 0 for a live webcam
+VIDEO_IN  = "adas/experiments/distance_estimation/dash2.mp4"   # or 0 for a live webcam
 ROAD_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle", "person"}
 
 detector = YOLO(DET_MODEL)

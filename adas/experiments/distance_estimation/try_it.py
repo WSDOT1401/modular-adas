@@ -13,8 +13,8 @@ from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
 DET_MODEL = "yolo26n.pt"
 DEPTH_MODEL = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"  # metres, outdoor
-VIDEO_IN = "experiments/distance_estimation/dash2.mp4"
-VIDEO_OUT = "experiments/distance_estimation/out.mp4"
+VIDEO_IN = "adas/experiments/distance_estimation/dash2.mp4"
+VIDEO_OUT = "adas/experiments/distance_estimation/out.mp4"
 STRIDE = 1                       # process every Nth frame; raise to 2-3 to go faster
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"   # M2 GPU
 

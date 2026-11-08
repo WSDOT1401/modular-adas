@@ -11,6 +11,8 @@ cluster and the hardware it is wired to. The vehicle-independent ADAS lives in
 | `carplay/` | Node.js bridge for the CarPlay USB dongle (video, touch and status over local TCP). |
 | `deploy/` | `start_kiosk.sh` launcher and the systemd unit that runs it at boot. |
 | `config/` | Per-vehicle settings (placeholder). |
+| `package.json` | Node dependency (`canvas`) for the dashboard's image-generation scripts. |
+| `.gitignore` | Qt build/deploy output, runtime IPC files, `node_modules/`. |
 
 ## How it connects to the ADAS
 

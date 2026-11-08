@@ -18,5 +18,5 @@ source: ultralytics
 url: TODO   # e.g. https://github.com/ultralytics/assets/releases/download/<tag>/yolo26n.pt
 
 used_by:
-  - experiments/object_detection/   # benchmarking / prototyping
+  - adas/experiments/object_detection/   # benchmarking / prototyping
   - adas/vision/signs/              # (planned) traffic-sign detection

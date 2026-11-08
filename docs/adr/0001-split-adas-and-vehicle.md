@@ -24,15 +24,25 @@ Two top-level folders that share no code, only a message format:
 | `config/` | `w124/config/` |
 | `libs/protocol/` (package `w124_protocol`) | `adas/protocol/` (package `adas_protocol`) |
 | `services/vision/` | `adas/vision/` |
+| `experiments/` | `adas/experiments/` |
+| `models/` | `adas/models/` |
+| `tests/` | `adas/tests/` |
+| `environment.yml` | `adas/environment.yml` |
+| `.gitattributes` (LFS rule) | `adas/.gitattributes` |
+| ADAS rules in `.gitignore` | `adas/.gitignore` |
+| `package.json` | `w124/package.json` |
 
-`experiments/`, `models/`, `docs/` and `tests/` stay at the root.
+The root keeps only what belongs to the whole repository: `README.md`,
+`docs/` (decisions that span both halves, like this one), `.github/`, and a
+generic `.gitignore` (OS, editor, build and cache files).
 
 Rules:
 
 - `adas/` never imports from `w124/`, and `w124/` never imports from `adas/`.
   They meet only through the message channel defined in `adas/protocol/`.
-- `w124/` keeps its own `.gitignore` and refers only to paths inside itself,
-  so it can be split into its own repository without edits.
+- Each folder keeps its own `.gitignore` (and `adas/` its `.gitattributes`)
+  and refers only to paths inside itself, so either can be split into its own
+  repository without edits.
 
 ## Steps
 
@@ -51,6 +61,12 @@ Rules:
   `pip uninstall w124-protocol && pip install -e adas/protocol/python`.
 - A Pi running the systemd unit needs the unit re-copied: its `ExecStart`
   path now points at `w124/deploy/start_kiosk.sh`.
-- `experiments/` still mentions `services/vision/` in a few comments. It was
-  left untouched so the open traffic-sign branch merges cleanly; fix those
-  after it lands.
+- Scripts and notebooks that take repo-root-relative paths now start with
+  `adas/experiments/…` (the Kaggle notebook clones the repo and `cd`s there).
+- Merging a branch that still uses the old layout (checked against
+  `experiments/traffic-sign_recognition`): git places its new files under
+  `adas/experiments/` itself but flags each one as a "file location"
+  conflict, resolved with `git add`. The real work is `.gitignore`: rules the
+  branch added at the root move to `adas/.gitignore` without the `adas/`
+  prefix. Code that spells out `experiments/…` from the repo root (the Colab
+  notebooks' `EXP` path) needs the `adas/` prefix.

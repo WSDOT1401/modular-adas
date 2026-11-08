@@ -10,7 +10,7 @@ tail, so we train two coarser targets instead and compare them:
   quality and the front half of a detect-then-classify design.
 
 Deliberately dependency-free: this module is what will later seed
-``services/vision/signs/classes.py``, which runs on the Pi.
+``adas/vision/signs/classes.py``, which runs on the Pi.
 """
 from __future__ import annotations
 

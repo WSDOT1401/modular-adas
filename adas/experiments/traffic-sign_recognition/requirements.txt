@@ -1,8 +1,8 @@
 # GTSDB traffic-sign training deps. Runs on a free Kaggle GPU — see notebooks/.
 #
-# Note this experiment does NOT need libs/protocol: it trains and evaluates a
+# Note this experiment does NOT need adas/protocol: it trains and evaluates a
 # model, it never publishes to the cluster. Wiring a trained model into
-# services/vision/signs/ is separate, later work.
+# adas/vision/signs/ is separate, later work.
 #
 ultralytics>=8.4.69      # pins the API this code was verified against
 Pillow>=10               # PPM decode -> PNG; header-only size reads

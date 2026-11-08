@@ -1,11 +1,11 @@
-# experiments/traffic-sign_recognition
+# adas/experiments/traffic-sign_recognition
 
 Train YOLO26n to detect traffic signs on **GTSDB** (German Traffic Sign
 Detection Benchmark), on a free Kaggle GPU.
 
 ## Why this exists
 
-`services/vision/signs/` is still a set of `NotImplementedError` stubs, and we
+`adas/vision/signs/` is still a set of `NotImplementedError` stubs, and we
 had no evidence about what sign-detection accuracy is even reachable inside the
 Pi's compute budget. This experiment builds the training pipeline and produces
 real numbers against a standard benchmark.
@@ -16,7 +16,7 @@ drives on Thai roads. The *pipeline* is the deliverable, plus two findings:
 1. What does collapsing 43 classes into 4 super-classes buy over plain
    "is there a sign here" detection?
 2. What does training at **640** — the resolution
-   `experiments/object_detection/benchmark_yolo.py` shows the Pi can run in real
+   `adas/experiments/object_detection/benchmark_yolo.py` shows the Pi can run in real
    time — cost in mAP versus **1024**?
 
 ## The grid
@@ -85,7 +85,7 @@ git pull
 git lfs install && git lfs pull          # weights are LFS; without this you get text stubs
 pip install ultralytics ncnn
 
-cd experiments/traffic-sign_recognition
+cd adas/experiments/traffic-sign_recognition
 python3 benchmark_pi.py --source /path/to/road_frame.png
 python3 benchmark_pi.py --runs 4class-640 4class-1024   # just the interesting pair
 ```
@@ -105,7 +105,7 @@ blank frame under-reports NMS.
 
 ```
 classes.py         43 GTSDB ids -> label sets. Single source of truth; this is
-                   what later seeds services/vision/signs/classes.py
+                   what later seeds adas/vision/signs/classes.py
 prepare_gtsdb.py   GTSDB (.ppm + gt.txt) -> YOLO dataset + data.yaml
 train.py           one run: train -> validate best.pt -> export NCNN
 run_grid.py        all four runs, sequential, one failure doesn't kill the rest
@@ -127,10 +127,10 @@ Committed per run: `results.csv`, the plots, `args.yaml`, `run_meta.json`,
 `weights/best.pt`, and both NCNN exports (`fp32` + `fp16`) — about **20 MB per
 run, ~80 MB for the grid**. The `.pt`/`.png`/`.bin` files go through **Git LFS**
 (see the root `.gitattributes`); everything else is normal git. Weight sha256s
-are recorded in `models/manifests/gtsdb-yolo26n.yaml`.
+are recorded in `adas/models/manifests/gtsdb-yolo26n.yaml`.
 
 The NCNN artifacts feed the `NCNN` / `NCNN-FP16` rows in
-`experiments/object_detection/benchmark_yolo.py` directly — NCNN `param`/`bin`
+`adas/experiments/object_detection/benchmark_yolo.py` directly — NCNN `param`/`bin`
 are architecture-portable, so exporting on Kaggle x86 and running on the Pi's ARM
 is fine.
 

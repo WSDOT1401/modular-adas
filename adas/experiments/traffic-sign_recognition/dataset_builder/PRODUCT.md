@@ -6,7 +6,7 @@ cluster, a headless vision service), so a root-level PRODUCT.md would be
 misleading. Point impeccable here:
 
 ```bash
-IMPECCABLE_CONTEXT_DIR=experiments/traffic-sign_recognition/dataset_builder
+IMPECCABLE_CONTEXT_DIR=adas/experiments/traffic-sign_recognition/dataset_builder
 ```
 
 ## Register

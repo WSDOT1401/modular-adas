@@ -27,8 +27,9 @@ cluster/state.json
 carplay_status.json
 trip_reset.flag
 
-# --- CarPlay bridge dependencies ---
+# --- Node dependencies (CarPlay bridge, asset scripts) ---
 node_modules/
+package-lock.json
 
 # --- Python cache (vss reader) ---
 __pycache__/
