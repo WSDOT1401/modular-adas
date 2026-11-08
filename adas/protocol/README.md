@@ -2,7 +2,7 @@
 
 Single source of truth for how on-Pi producers (vehicle sensors, ADAS modules)
 talk to whatever displays their output. It belongs to no particular car: a
-vehicle integration (today, `w124/`) publishes vehicle data onto it and reads
+vehicle integration (today, [w124](https://github.com/WSDOT1401/w124)) publishes vehicle data onto it and reads
 ADAS results from it. Define a key once here; import it everywhere. The whole
 point is to stop each producer hand-rolling its own socket and re-typing key
 strings (where one typo = silently dropped data).

@@ -2,7 +2,8 @@
 
 Vehicle-independent driver-assistance software. It takes camera frames and
 vehicle data, and publishes warnings for whatever display a vehicle provides.
-The W124 integration that uses it lives in [`../w124/`](../w124/).
+The W124 integration that uses it lives in its own repository,
+[w124](https://github.com/WSDOT1401/w124).
 
 | Folder | What it is |
 |---|---|

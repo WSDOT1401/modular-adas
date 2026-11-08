@@ -48,6 +48,5 @@ __pycache__/
 # --- AI assistant local guidance (not committed) ---
 CLAUDE.md
 
-# Folder-specific rules live next to their files: adas/.gitignore (weights,
-# datasets, footage, editable installs) and w124/.gitignore (Qt deploy output,
-# runtime IPC files, CarPlay node_modules).
+# ADAS-specific rules (weights, datasets, footage, editable installs) live
+# next to their files in adas/.gitignore.
