@@ -19,4 +19,4 @@ url: TODO   # e.g. https://github.com/ultralytics/assets/releases/download/<tag>
 
 used_by:
   - experiments/object_detection/   # benchmarking / prototyping
-  - services/vision/signs/          # (planned) traffic-sign detection
+  - adas/vision/signs/              # (planned) traffic-sign detection

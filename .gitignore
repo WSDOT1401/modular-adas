@@ -29,19 +29,7 @@ install_manifest.txt
 **/.generated/
 **/.rcc/
 
-# --- Qt deployment/runtime copied binaries & plugins ---
-apps/cluster/build-*/**/*.dll
-apps/cluster/build-*/generic/
-apps/cluster/build-*/iconengines/
-apps/cluster/build-*/imageformats/
-apps/cluster/build-*/networkinformation/
-apps/cluster/build-*/platforms/
-apps/cluster/build-*/qml/
-apps/cluster/build-*/qmltooling/
-apps/cluster/build-*/qmltypes/
-apps/cluster/build-*/tls/
-apps/cluster/build-*/translations/
-apps/cluster/build-*/W124Cluster/
+# W124-specific rules (Qt deploy output, runtime IPC files) live in w124/.gitignore.
 
 # --- Node.js tooling (PNG generation scripts, etc.) ---
 node_modules/
@@ -58,22 +46,17 @@ list.txt
 # --- Python cache (pi helpers) ---
 __pycache__/
 *.py[cod]
-apps/cluster/state.json
 
 # --- AI assistant local guidance (not committed) ---
 CLAUDE.md
 
-# --- Python packaging (editable installs of libs/) ---
+# --- Python packaging (editable installs, e.g. adas/protocol) ---
 *.egg-info/
 .eggs/
 
 # --- Vision sample media / replay clips (keep the dir, not the footage) ---
-services/vision/tests/fixtures/*
-!services/vision/tests/fixtures/.gitkeep
-
-# --- Runtime IPC files (generated; shared between producers and cluster) ---
-carplay_status.json
-trip_reset.flag
+adas/vision/tests/fixtures/*
+!adas/vision/tests/fixtures/.gitkeep
 
 # --- ML weights / sample media / inference outputs (experiments, models, vision) ---
 # Raw weights & media are never committed (see models/manifests/ for their metadata);
