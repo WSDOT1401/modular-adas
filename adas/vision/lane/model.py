@@ -5,7 +5,7 @@ the seam for a learned lane-segmentation model (e.g. a small CNN) that produces
 the same signed lateral offset ``departure.DepartureDecider`` consumes, so the
 two are interchangeable without touching the decision logic.
 
-TODO: implement (load weights via a ``models/manifests/`` entry; run inference;
+TODO: implement (load weights via a ``adas/models/manifests/`` entry; run inference;
 return a signed offset). Not required for the classical-CV path.
 """
 from __future__ import annotations

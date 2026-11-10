@@ -1,7 +1,7 @@
 """Traffic-sign detector — per-frame sign bounding boxes.
 
 Object-detection front end for the signs pipeline (YOLO-class model; see the
-benchmarking groundwork in ``experiments/object_detection/``). Emits raw
+benchmarking groundwork in ``adas/experiments/object_detection/``). Emits raw
 detections that ``tracker.py`` stabilises across frames and ``classes.py``
 maps to sign meanings.
 

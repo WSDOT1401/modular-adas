@@ -29,9 +29,7 @@ install_manifest.txt
 **/.generated/
 **/.rcc/
 
-# W124-specific rules (Qt deploy output, runtime IPC files) live in w124/.gitignore.
-
-# --- Node.js tooling (PNG generation scripts, etc.) ---
+# --- Node.js dependencies ---
 node_modules/
 package-lock.json
 
@@ -43,39 +41,12 @@ list.txt
 *.tmp
 *.bak
 
-# --- Python cache (pi helpers) ---
+# --- Python cache ---
 __pycache__/
 *.py[cod]
 
 # --- AI assistant local guidance (not committed) ---
 CLAUDE.md
 
-# --- Python packaging (editable installs, e.g. adas/protocol) ---
-*.egg-info/
-.eggs/
-
-# --- Vision sample media / replay clips (keep the dir, not the footage) ---
-adas/vision/tests/fixtures/*
-!adas/vision/tests/fixtures/.gitkeep
-
-# --- ML weights / sample media / inference outputs (experiments, models, vision) ---
-# Raw weights & media are never committed (see models/manifests/ for their metadata);
-# benchmark CSVs under experiments/ are tracked.
-*.pt
-*.jpg
-*.mp4
-runs/
-.env
-# --- Traffic-sign experiment (experiments/traffic-sign_recognition) ---
-# Generated YOLO datasets: the PNG cache and per-label-set labels. Fully
-# rebuildable from GTSDB with prepare_gtsdb.py, so not worth versioning.
-experiments/traffic-sign_recognition/datasets/
-# results/ IS tracked, via Git LFS (see .gitattributes). The blanket *.pt rule
-# above would otherwise silently swallow the trained weights.
-!experiments/traffic-sign_recognition/results/**/*.pt
-gtsdb-dataset/
-# Frame-curation web app: raw footage and the regenerable frame cache. The
-# blanket *.mp4 / *.jpg rules above miss .mov/.mkv/.mts and workspace metadata.
-experiments/traffic-sign_recognition/dataset_builder/footage/*
-!experiments/traffic-sign_recognition/dataset_builder/footage/.gitkeep
-experiments/traffic-sign_recognition/dataset_builder/workspace/
+# ADAS-specific rules (weights, datasets, footage, editable installs) live
+# next to their files in adas/.gitignore.

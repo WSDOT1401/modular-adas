@@ -1,6 +1,7 @@
 # 0001 — Split the modular ADAS from the W124 vehicle integration
 
-Status: accepted (step 1 implemented) · 2026-11-08
+Status: accepted (step 1 implemented) · 2026-11-08 · updated 2026-11-09:
+`w124/` moved to its own repository (see the end)
 
 ## Context
 
@@ -24,15 +25,25 @@ Two top-level folders that share no code, only a message format:
 | `config/` | `w124/config/` |
 | `libs/protocol/` (package `w124_protocol`) | `adas/protocol/` (package `adas_protocol`) |
 | `services/vision/` | `adas/vision/` |
+| `experiments/` | `adas/experiments/` |
+| `models/` | `adas/models/` |
+| `tests/` | `adas/tests/` |
+| `environment.yml` | `adas/environment.yml` |
+| `.gitattributes` (LFS rule) | `adas/.gitattributes` |
+| ADAS rules in `.gitignore` | `adas/.gitignore` |
+| `package.json` | `w124/package.json` |
 
-`experiments/`, `models/`, `docs/` and `tests/` stay at the root.
+The root keeps only what belongs to the whole repository: `README.md`,
+`docs/` (decisions that span both halves, like this one), `.github/`, and a
+generic `.gitignore` (OS, editor, build and cache files).
 
 Rules:
 
 - `adas/` never imports from `w124/`, and `w124/` never imports from `adas/`.
   They meet only through the message channel defined in `adas/protocol/`.
-- `w124/` keeps its own `.gitignore` and refers only to paths inside itself,
-  so it can be split into its own repository without edits.
+- Each folder keeps its own `.gitignore` (and `adas/` its `.gitattributes`)
+  and refers only to paths inside itself, so either can be split into its own
+  repository without edits.
 
 ## Steps
 
@@ -46,11 +57,33 @@ Rules:
 
 ## Consequences
 
-- Anyone with an existing checkout must rebuild the cluster from
-  `w124/cluster/` and reinstall the protocol package:
+- Anyone with an existing checkout must reinstall the protocol package:
   `pip uninstall w124-protocol && pip install -e adas/protocol/python`.
-- A Pi running the systemd unit needs the unit re-copied: its `ExecStart`
-  path now points at `w124/deploy/start_kiosk.sh`.
-- `experiments/` still mentions `services/vision/` in a few comments. It was
-  left untouched so the open traffic-sign branch merges cleanly; fix those
-  after it lands.
+- The W124 cluster is no longer built or deployed from this repository; see
+  the update below.
+- Scripts and notebooks that take repo-root-relative paths now start with
+  `adas/experiments/…` (the Kaggle notebook clones the repo and `cd`s there).
+- Merging a branch that still uses the old layout (checked against
+  `experiments/traffic-sign_recognition`): git places its new files under
+  `adas/experiments/` itself but flags each one as a "file location"
+  conflict, resolved with `git add`. The real work is `.gitignore`: rules the
+  branch added at the root move to `adas/.gitignore` without the `adas/`
+  prefix. Code that spells out `experiments/…` from the repo root (the Colab
+  notebooks' `EXP` path) needs the `adas/` prefix.
+
+## Update 2026-11-09: `w124/` is its own repository
+
+The rules above let `w124/` leave without edits, so it did:
+[WSDOT1401/w124](https://github.com/WSDOT1401/w124), with its history kept (files that lived at
+`qt_cluster/`, `apps/cluster/`, `services/vss/`, `services/carplay/` and
+`deploy/` were rewritten to their current paths there). This repository now
+holds only the ADAS; the `w124/` rows in the table above record where those
+files went before they left.
+
+- A Pi runs the cluster from a clone of the w124 repository, installed as a
+  systemd user service (see its `cluster/README.md`).
+- Car-specific changes go to the w124 repository. Changes to the message
+  contract go here, in `adas/protocol/`, and the car follows.
+- A branch that still edits the old W124 paths here (`apps/cluster/`,
+  `services/vss/`, `services/carplay/`, `deploy/`) will hit modify/delete
+  conflicts; move those edits to the w124 repository instead.
