@@ -8,7 +8,7 @@ Reads what training already wrote — no re-running, no GPU:
                      columns at ``engine/trainer.py:530``)
 * ``args.yaml``      the resolved training arguments
 
-Stdlib ``csv`` on purpose: pandas is not installed in the w124-dash-env.
+Stdlib ``csv`` on purpose: pandas is not installed in the modular-adas env.
 
 Usage::
 

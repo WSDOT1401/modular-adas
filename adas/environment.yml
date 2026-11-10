@@ -1,7 +1,6 @@
-name: w124-dash-env
+name: modular-adas
 channels:
   - defaults
 dependencies:
   - python=3.13
   - ultralytics
-prefix: /Users/mymacaroni/miniconda3/envs/w124-dash-env

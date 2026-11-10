@@ -21,7 +21,7 @@ Studio, which already do annotation better than we could.
 ## Quickstart
 
 ```bash
-CONDA=~/miniconda3/envs/w124-dash-env/bin
+CONDA=~/miniconda3/envs/modular-adas/bin
 $CONDA/pip install -r requirements.txt      # flask; opencv is already there
 
 cp /path/to/*.MP4 footage/                  # 1. drop footage in

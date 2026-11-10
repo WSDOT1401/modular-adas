@@ -49,7 +49,7 @@ the full grid.
 ## Run it locally
 
 ```bash
-CONDA=~/miniconda3/envs/w124-dash-env/bin
+CONDA=~/miniconda3/envs/modular-adas/bin
 
 # unit tests — no GPU, no dataset, no network
 $CONDA/python -m pytest tests -v
