@@ -1,0 +1,18 @@
+[Unit]
+Description=Modular ADAS display
+# A user service (systemctl --user): runs as whoever is logged in to the
+# desktop, so it reaches the Wayland session. Retry until the desktop is up.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# %h is the home folder; edit if the repo is not at ~/modular-adas.
+WorkingDirectory=%h/modular-adas/adas/display
+ExecStart=%h/modular-adas/adas/display/build/adas_display
+Restart=always
+RestartSec=2
+Environment=QT_QPA_PLATFORM=wayland
+Environment=WAYLAND_DISPLAY=wayland-0
+
+[Install]
+WantedBy=default.target

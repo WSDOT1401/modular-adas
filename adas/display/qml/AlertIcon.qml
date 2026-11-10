@@ -1,0 +1,77 @@
+import QtQuick
+import QtQuick.Shapes
+
+// Banner icon for the 4:3 layout: a triangle for caution/warning, an "i" for
+// info, a crossed-out camera for system faults. Nothing for "none".
+Item {
+    id: root
+    property string level: "none"
+    property color color: "white"
+    width: 34
+    height: 34
+
+    Shape {
+        anchors.fill: parent
+        visible: root.level === "caution" || root.level === "warning"
+        layer.enabled: true
+        layer.samples: 4
+        ShapePath {
+            strokeColor: root.color
+            strokeWidth: 3
+            fillColor: "transparent"
+            joinStyle: ShapePath.RoundJoin
+            startX: 17; startY: 4
+            PathLine { x: 32; y: 30 }
+            PathLine { x: 2; y: 30 }
+            PathLine { x: 17; y: 4 }
+        }
+    }
+    Text {
+        visible: root.level === "caution" || root.level === "warning"
+        x: 0; y: 9; width: 34
+        horizontalAlignment: Text.AlignHCenter
+        text: "!"
+        color: root.color
+        font.pixelSize: 18
+        font.weight: Font.Bold
+    }
+
+    Rectangle {
+        visible: root.level === "info"
+        anchors.fill: parent
+        anchors.margins: 3
+        radius: width / 2
+        color: "transparent"
+        border.color: root.color
+        border.width: 3
+        Text {
+            anchors.centerIn: parent
+            text: "i"
+            color: root.color
+            font.pixelSize: 18
+            font.weight: Font.Bold
+        }
+    }
+
+    Item {
+        visible: root.level === "system"
+        anchors.fill: parent
+        Rectangle {
+            x: 3; y: 9; width: 28; height: 20; radius: 4
+            color: "transparent"
+            border.color: root.color
+            border.width: 3
+        }
+        Rectangle {
+            x: 11; y: 13; width: 12; height: 12; radius: 6
+            color: "transparent"
+            border.color: root.color
+            border.width: 3
+        }
+        Rectangle {
+            x: 2; y: 16; width: 30; height: 3
+            rotation: 45
+            color: root.color
+        }
+    }
+}
