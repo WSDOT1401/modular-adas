@@ -18,7 +18,7 @@ import itertools
 import time
 
 from adas_protocol import (
-    FCW_TTC, FCW_WARNING, INPUT, INPUT_EVENTS, LANE_DIRECTION, LANE_WARNING,
+    FCW_TTC, FCW_WARNING, INPUT, LEAD_VEHICLE, INPUT_EVENTS, LANE_DIRECTION, LANE_WARNING,
     MODULE_STATUS, SIGN_SEEN, SPEED, SPEED_LIMIT, SYSTEM_FAULT, UdpPublisher,
 )
 
@@ -29,6 +29,7 @@ BASE = {
     LANE_DIRECTION: "none",
     FCW_WARNING: False,
     FCW_TTC: 0,
+    LEAD_VEHICLE: False,
     SYSTEM_FAULT: "",
     MODULE_STATUS: {"lane": "on", "fcw": "on", "signs": "on"},
 }
@@ -37,7 +38,8 @@ CHANGES = {
     "cruise": {},
     "lane_left": {SPEED: 84, LANE_WARNING: True, LANE_DIRECTION: "left"},
     "lane_right": {SPEED: 84, LANE_WARNING: True, LANE_DIRECTION: "right"},
-    "fcw": {SPEED: 76, FCW_WARNING: True, FCW_TTC: 1.2},
+    "fcw": {SPEED: 76, FCW_WARNING: True, FCW_TTC: 1.2, LEAD_VEHICLE: True},
+    "following": {SPEED: 74, LEAD_VEHICLE: True},
     "overspeed": {SPEED: 103},
     "new_sign": {SPEED: 58, SPEED_LIMIT: 60, SIGN_SEEN: "speed_limit"},
     "fault": {

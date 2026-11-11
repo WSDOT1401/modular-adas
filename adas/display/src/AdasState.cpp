@@ -76,6 +76,10 @@ void AdasState::applyJson(const QJsonObject& obj) {
         m_fcwTtc = obj.value(QLatin1String("fcw_ttc")).toDouble();
         adas = true;
     }
+    if (obj.contains(QLatin1String("lead_vehicle"))) {
+        m_leadVehicle = obj.value(QLatin1String("lead_vehicle")).toBool();
+        adas = true;
+    }
     if (obj.contains(QLatin1String("speed_limit"))) {
         m_speedLimit = qRound(obj.value(QLatin1String("speed_limit")).toDouble());
         adas = true;

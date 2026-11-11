@@ -27,6 +27,7 @@ class AdasState : public QObject {
     Q_PROPERTY(QString laneDirection READ laneDirection NOTIFY changed)
     Q_PROPERTY(bool fcwWarning READ fcwWarning NOTIFY changed)
     Q_PROPERTY(double fcwTtc READ fcwTtc NOTIFY changed)
+    Q_PROPERTY(bool leadVehicle READ leadVehicle NOTIFY changed)
     Q_PROPERTY(QString signSeen READ signSeen NOTIFY changed)
     Q_PROPERTY(bool signFresh READ signFresh NOTIFY changed)
     Q_PROPERTY(QString moduleLane READ moduleLane NOTIFY changed)
@@ -58,6 +59,7 @@ public:
     QString laneDirection() const { return m_laneDirection; }
     bool fcwWarning() const { return m_fcwWarning && m_adasOnline; }
     double fcwTtc() const { return m_fcwTtc; }
+    bool leadVehicle() const { return m_leadVehicle && m_adasOnline; }
     QString signSeen() const { return m_signSeen; }
     bool signFresh() const { return m_signFresh; }
     QString moduleLane() const { return moduleState(m_moduleLane); }
@@ -101,6 +103,7 @@ private:
     QString m_laneDirection = QStringLiteral("none");
     bool m_fcwWarning = false;
     double m_fcwTtc = 0.0;
+    bool m_leadVehicle = false;
     QString m_signSeen;
     qint64 m_signAt = -1;
     QString m_moduleLane;

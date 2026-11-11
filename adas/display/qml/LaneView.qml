@@ -1,12 +1,14 @@
 import QtQuick
 import QtQuick.Shapes
 
-// The road ahead from behind the car: our lane, our car, and a vehicle ahead
-// when a collision is near. Drawn on a 440×260 grid; scale it to fit.
+// The road ahead from behind the car: our lane, our car, and the vehicle
+// ahead when we are following one (green) or about to hit it (red).
+// Drawn on a 440×260 grid; scale it to fit.
 Item {
     id: root
     property string drift: "none"   // "left", "right" or "none"
     property bool lead: false       // vehicle ahead (collision warning)
+    property bool following: false  // the camera sees a vehicle ahead in our lane
     property bool paused: false     // camera unusable: dashed lines, grey car
 
     width: 440
@@ -115,18 +117,33 @@ Item {
         }
     }
 
-    // vehicle ahead: a far-away silhouette in red
+    // vehicle ahead: green while we are just following it, with three gap
+    // bars like an adaptive-cruise distance icon; red when a collision is near
+    readonly property bool showFollowing: following && !lead && !paused
     CarRear {
-        visible: root.lead
+        visible: root.lead || root.showFollowing
         x: 220 - width / 2
         y: 56
         scale: 0.3
         transformOrigin: Item.Top
-        body: Theme.warning
-        glass: "#5A1410"
-        trim: "#B8382C"
-        tail: "#5A1410"
+        body: root.lead ? Theme.warning : Theme.active
+        glass: root.lead ? "#5A1410" : "#123A26"
+        trim: root.lead ? "#B8382C" : "#2F8A57"
+        tail: root.lead ? "#5A1410" : "#123A26"
         details: false
+    }
+    Repeater {
+        model: [{ y: 102, w: 24 }, { y: 112, w: 32 }, { y: 122, w: 40 }]
+        Rectangle {
+            required property var modelData
+            visible: root.showFollowing
+            x: 220 - width / 2
+            y: modelData.y
+            width: modelData.w
+            height: 5
+            radius: 2.5
+            color: Theme.active
+        }
     }
 
     // our car, from behind and above, its wheels on the bottom edge

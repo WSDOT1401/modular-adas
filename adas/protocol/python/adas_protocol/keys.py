@@ -27,6 +27,7 @@ LANE_DIRECTIONS = ("left", "right", "none")
 # --- ADAS / forward collision (consumed by adas/display) ------------------
 FCW_WARNING = "fcw_warning"          # bool  — collision risk ahead, brake
 FCW_TTC = "fcw_ttc"                  # s     — time to collision (0 = unknown)
+LEAD_VEHICLE = "lead_vehicle"        # bool  — a vehicle ahead in our lane: we are following it
 
 # --- ADAS / traffic signs (consumed by adas/display) ----------------------
 SPEED_LIMIT = "speed_limit"          # km/h  — limit in force (0 = unknown)
@@ -44,7 +45,8 @@ MODULE_STATES = ("on", "paused", "off")
 
 ADAS_KEYS = frozenset({
     LANE_WARNING, LANE_DIRECTION, LANE_CONFIDENCE,
-    FCW_WARNING, FCW_TTC, SPEED_LIMIT, SIGN_SEEN, MODULE_STATUS, SYSTEM_FAULT,
+    FCW_WARNING, FCW_TTC, LEAD_VEHICLE, SPEED_LIMIT, SIGN_SEEN, MODULE_STATUS,
+    SYSTEM_FAULT,
 })
 
 # --- Driver input (consumed by adas/display) ------------------------------

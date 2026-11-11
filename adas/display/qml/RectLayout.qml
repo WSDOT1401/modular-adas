@@ -122,6 +122,7 @@ Item {
             transformOrigin: Item.TopLeft
             drift: st.laneWarning ? st.laneDirection : "none"
             lead: st.fcwWarning
+            following: st.leadVehicle
             paused: root.paused
         }
         // camera can't see: a struck-through camera over the road

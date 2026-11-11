@@ -19,7 +19,7 @@ rotary encoder ─┘  {"input": "press"}, ...
 
 | Comes from | Keys | Notes |
 |---|---|---|
-| Vision service (`adas/vision`) | `lane_warning`, `lane_direction`, `fcw_warning`, `fcw_ttc`, `speed_limit`, `sign_seen`, `module_status`, `system_fault` | Send `module_status` every cycle: if no ADAS key arrives for 3 s the rim turns dashed and every feature icon shows as unavailable. |
+| Vision service (`adas/vision`) | `lane_warning`, `lane_direction`, `fcw_warning`, `fcw_ttc`, `lead_vehicle`, `speed_limit`, `sign_seen`, `module_status`, `system_fault` | Send `module_status` every cycle: if no ADAS key arrives for 3 s the rim turns dashed and every feature icon shows as unavailable. |
 | Any speed source | `speed` | A gearbox sender, GPS, OBD or IMU-based estimate; whoever has it publishes it. Stale after 3 s, then shown as `--`. |
 | Driver controls | `input` = `rotate_cw`, `rotate_ccw`, `press`, `long_press` | The rotary encoder script below, a steering-wheel button, or a test script. |
 
@@ -43,6 +43,7 @@ shown. One alert at a time, highest first:
 
 | Level | Colour | Reason | Round | 4:3 |
 |---|---|---|---|---|
+| — | green | following a vehicle (`lead_vehicle`), not an alert | the car ahead drawn green, with three gap bars | same |
 | Warning | red | vehicle ahead (`fcw`) | whole rim pulses, **BRAKE** replaces the speed | red **BRAKE** banner, frame pulses |
 | System | grey | ADAS not running, fault | dashed rim, dashed lane lines, grey car | grey banner |
 | System | grey | camera blocked or not found | as above, plus a struck-through camera over the road and **CAMERA VIEW BLOCKED** | as above, plus the camera and **CAMERA VIEW BLOCKED** |

@@ -154,6 +154,7 @@ Item {
         y: 304
         drift: st.laneWarning ? st.laneDirection : "none"
         lead: st.fcwWarning
+        following: st.leadVehicle
         paused: root.paused
     }
 
