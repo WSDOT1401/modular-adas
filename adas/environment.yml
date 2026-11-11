@@ -1,0 +1,6 @@
+name: modular-adas
+channels:
+  - defaults
+dependencies:
+  - python=3.13
+  - ultralytics

@@ -29,21 +29,7 @@ install_manifest.txt
 **/.generated/
 **/.rcc/
 
-# --- Qt deployment/runtime copied binaries & plugins ---
-apps/cluster/build-*/**/*.dll
-apps/cluster/build-*/generic/
-apps/cluster/build-*/iconengines/
-apps/cluster/build-*/imageformats/
-apps/cluster/build-*/networkinformation/
-apps/cluster/build-*/platforms/
-apps/cluster/build-*/qml/
-apps/cluster/build-*/qmltooling/
-apps/cluster/build-*/qmltypes/
-apps/cluster/build-*/tls/
-apps/cluster/build-*/translations/
-apps/cluster/build-*/W124Cluster/
-
-# --- Node.js tooling (PNG generation scripts, etc.) ---
+# --- Node.js dependencies ---
 node_modules/
 package-lock.json
 
@@ -55,78 +41,12 @@ list.txt
 *.tmp
 *.bak
 
-# --- Python cache (pi helpers) ---
+# --- Python cache ---
 __pycache__/
 *.py[cod]
-apps/cluster/state.json
 
 # --- AI assistant local guidance (not committed) ---
 CLAUDE.md
 
-# --- Python packaging (editable installs of libs/) ---
-*.egg-info/
-.eggs/
-
-# --- Vision sample media / replay clips (keep the dir, not the footage) ---
-services/vision/tests/fixtures/*
-!services/vision/tests/fixtures/.gitkeep
-
-# --- Runtime IPC files (generated; shared between producers and cluster) ---
-carplay_status.json
-trip_reset.flag
-
-# --- ML weights / sample media / inference outputs (experiments, models, vision) ---
-# Raw weights & media are never committed (see models/manifests/ for their metadata);
-# benchmark CSVs under experiments/ are tracked.
-*.pt
-*.jpg
-*.mp4
-runs/
-.env
-# --- Traffic-sign experiment (experiments/traffic-sign_recognition) ---
-# Generated YOLO datasets: the PNG cache and per-label-set labels. Fully
-# rebuildable from GTSDB with prepare_gtsdb.py, so not worth versioning.
-experiments/traffic-sign_recognition/datasets/
-# results/ IS tracked, via Git LFS (see .gitattributes). The blanket *.pt rule
-# above would otherwise silently swallow the trained weights.
-!experiments/traffic-sign_recognition/results/**/*.pt
-gtsdb-dataset/
-# Frame-curation web app: raw footage and the regenerable frame cache. The
-# blanket *.mp4 / *.jpg rules above miss .mov/.mkv/.mts and workspace metadata.
-experiments/traffic-sign_recognition/dataset_builder/footage/*
-!experiments/traffic-sign_recognition/dataset_builder/footage/.gitkeep
-experiments/traffic-sign_recognition/dataset_builder/workspace/
-# Contents only, so extractor.py stays tracked -- git never descends into an
-# excluded directory, so ignoring the directory itself would make the
-# negation below unreachable.
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/datasets/*
-!experiments/traffic-sign_recognition/thai-traffic-sign-labs/datasets/extractor.py
-# Generated audit figures (~15 MB). qa/*.py stay tracked.
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/qa/out/
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/results/*
-# autolabel scratch
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/work/
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/golden-experiment/work/
-# autolabel pipeline: raw footage, the regenerable frame+score cache, the
-# batches (images) and the built dataset. app/notebook.json is NOT ignored --
-# it records which frames a human picked, which is real dataset provenance.
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/app/footage/
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/app/workspace/
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/batches/
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/dataset/
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/*.zip
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/predictions.csv
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/results/*
-# ...but the little script that runs the trained model over new footage is code.
-!experiments/traffic-sign_recognition/thai-traffic-sign-labs/autolabel/results/*.py
-
-# Training logs. NOT a blanket *.txt -- CMakeLists.txt and three
-# requirements.txt are tracked. The runs are not reproducible anyway (synth.py
-# draws new data every epoch); what the logs taught is in the classifier README.
-train_log_*.txt
-
-# Beep/alert audio prototyping: ~20 generated wavs plus a notebook that is
-# still scratch. Promote it out of here when it becomes a service.
-experiments/sign_beep/
-experiments/pi_recording/footage-test
-experiments/pi_recording/footage
+# ADAS-specific rules (weights, datasets, footage, editable installs) live
+# next to their files in adas/.gitignore.
