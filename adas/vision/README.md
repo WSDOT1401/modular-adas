@@ -75,7 +75,8 @@ cd adas/vision && python3 -m pytest      # runs tests/unit/test_departure.py
 ## The warning contract
 
 Pushes `{"lane_warning": bool, "lane_direction": "left"|"right"|"none",
-"lane_confidence": 0..1}`. These keys are **proposed** — the C++ consumer
-silently drops them until `VehicleState` adds the matching `Q_PROPERTY`s and
-parses them in `applyJson()`, then QML binds them. See
-[`adas/protocol/README.md`](../protocol/README.md).
+"lane_confidence": 0..1}`, which the ADAS display ([`adas/display`](../display/))
+shows. The display also expects `module_status` every cycle (it shows
+**ADAS not running** after 3 s without ADAS keys) and, once those stages exist,
+the collision (`fcw_*`), sign (`speed_limit`, `sign_seen`) and `system_fault`
+keys. See [`adas/protocol/README.md`](../protocol/README.md).

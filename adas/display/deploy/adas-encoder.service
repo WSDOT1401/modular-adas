@@ -1,0 +1,13 @@
+[Unit]
+Description=Modular ADAS rotary encoder
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/modular-adas
+ExecStart=/usr/bin/python3 %h/modular-adas/adas/display/input/rotary_encoder.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
