@@ -110,9 +110,18 @@ Window {
         oilTemp: vehicleState.oilTemp
         outsideTemp: vehicleState.outsideTemp
         voltage:     vehicleState.voltage
+        warningText:   vehicleState.signClass.replace(/_/g, " ").toUpperCase()
+        warningActive: signTimer.running
 
         Component.onCompleted: gauge.mainAreaMode = vehicleState.profilePage
         onMainAreaModeChanged: vehicleState.profilePage = gauge.mainAreaMode
+    }
+
+    // Sign pill stays up while signs keep arriving, fades 3 s after the last one
+    Timer { id: signTimer; interval: 3000 }
+    Connections {
+        target: vehicleState
+        function onSignClassChanged() { signTimer.restart() }
     }
 
     // ── Settings overlay ──────────────────────────────────────────

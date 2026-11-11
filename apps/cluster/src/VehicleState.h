@@ -24,6 +24,7 @@ class VehicleState : public QObject {
     Q_PROPERTY(double oilTemp READ oilTemp NOTIFY oilTempChanged)
     Q_PROPERTY(double outsideTemp READ outsideTemp NOTIFY outsideTempChanged)
     Q_PROPERTY(double voltage READ voltage NOTIFY voltageChanged)
+    Q_PROPERTY(QString signClass READ signClass NOTIFY signClassChanged)
 
 public:
     explicit VehicleState(QObject* parent = nullptr);
@@ -46,6 +47,7 @@ public:
     double oilTemp() const;
     double outsideTemp() const;
     double voltage() const;
+    QString signClass() const;
 
     void setSpeed(double value);
     void setOdometer(double value);
@@ -80,6 +82,7 @@ signals:
     void oilTempChanged();
     void outsideTempChanged();
     void voltageChanged();
+    void signClassChanged();
 
 private:
     void updatePolling();
@@ -115,6 +118,7 @@ private:
     double m_oilTemp = -1.0;
     double m_outsideTemp = -999.0;
     double m_voltage = 0.0;
+    QString m_signClass;
     int m_udpPort = 9100;
     QTimer m_pollTimer;
     QTimer m_integrateTimer;

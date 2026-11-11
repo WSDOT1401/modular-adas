@@ -237,6 +237,12 @@ void VehicleState::applyJson(const QJsonObject& obj) {
         setOutsideTemp(obj["outside_temp"].toDouble());
     if (obj.contains("voltage") && obj["voltage"].isDouble())
         setVoltage(obj["voltage"].toDouble());
+    if (obj.contains("sign_class") && obj["sign_class"].isString()) {
+        m_signClass = obj["sign_class"].toString();
+        // No equality guard, unlike the setters above: every datagram (even a
+        // repeat STOP) must re-arm the overlay timer in Main.qml.
+        emit signClassChanged();
+    }
 }
 
 void VehicleState::integrateDistanceNow() {
@@ -289,6 +295,7 @@ void VehicleState::setLastUpdateMs(qlonglong value) {
 double VehicleState::oilTemp() const { return m_oilTemp; }
 double VehicleState::outsideTemp() const { return m_outsideTemp; }
 double VehicleState::voltage()     const { return m_voltage; }
+QString VehicleState::signClass()  const { return m_signClass; }
 
 void VehicleState::setOilTemp(double value) {
     if (qFuzzyCompare(m_oilTemp, value)) return;
