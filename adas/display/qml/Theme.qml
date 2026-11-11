@@ -60,10 +60,14 @@ QtObject {
         }
     }
 
+    // A speed-limit sign id such as "speed_limit_60". The layouts light up
+    // the limit sign itself instead of showing the same sign twice.
+    function isLimitSign(id) { return /^speed_limit_[0-9]+$/.test(id || "") }
+
     // Sign class ids (adas/vision) to words. Unknown ids are shown tidied up.
     function signLabel(id) {
+        if (isLimitSign(id)) return "Speed limit " + id.slice(12)
         const names = {
-            "no_overtaking": "No overtaking",
             "stop": "Stop",
             "give_way": "Give way",
             "no_entry": "No entry",

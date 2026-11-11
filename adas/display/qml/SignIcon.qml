@@ -1,10 +1,10 @@
 import QtQuick
 
-// A round regulatory sign (red ring on white): a speed limit, no overtaking,
-// or any other sign id drawn as a short label.
+// A round regulatory sign (red ring on white): a speed limit, or any other
+// sign id drawn as a short label.
 Item {
     id: root
-    property string kind: "limit"   // "limit", "no_overtaking" or any sign id
+    property string kind: "limit"   // "limit" or any sign id
     property int value: 0           // the number on a speed-limit sign
     property real size: 84
     property bool dim: false        // ring drawn grey when the value is stale/unknown
@@ -37,18 +37,8 @@ Item {
         color: "#111111"
     }
 
-    // No overtaking: a black car beside a red one.
-    Item {
-        visible: root.kind === "no_overtaking"
-        anchors.fill: parent
-        Rectangle { x: 26 * root.u; y: 37 * root.u; width: 16 * root.u; height: 10 * root.u; radius: 3 * root.u; color: "#111111" }
-        Rectangle { x: 22 * root.u; y: 45 * root.u; width: 24 * root.u; height: 15 * root.u; radius: 4 * root.u; color: "#111111" }
-        Rectangle { x: 58 * root.u; y: 37 * root.u; width: 16 * root.u; height: 10 * root.u; radius: 3 * root.u; color: Theme.signRed }
-        Rectangle { x: 54 * root.u; y: 45 * root.u; width: 24 * root.u; height: 15 * root.u; radius: 4 * root.u; color: Theme.signRed }
-    }
-
     Text {
-        visible: root.kind !== "limit" && root.kind !== "no_overtaking"
+        visible: root.kind !== "limit"
         anchors.centerIn: parent
         width: 60 * root.u
         horizontalAlignment: Text.AlignHCenter

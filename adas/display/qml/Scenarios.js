@@ -26,7 +26,7 @@ function payload(name) {
     case "overspeed":
         p.speed = 103; break
     case "new_sign":
-        p.speed = 72; p.sign_seen = "no_overtaking"; break
+        p.speed = 58; p.speed_limit = 60; p.sign_seen = "speed_limit_60"; break
     case "fault":
         p.speed = 80; p.system_fault = "camera_blocked"
         p.module_status = { lane: "paused", fcw: "paused", signs: "paused" }

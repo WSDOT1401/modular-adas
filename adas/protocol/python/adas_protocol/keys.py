@@ -31,7 +31,7 @@ FCW_TTC = "fcw_ttc"                  # s     — time to collision (0 = unknown)
 # --- ADAS / traffic signs (consumed by adas/display) ----------------------
 SPEED_LIMIT = "speed_limit"          # km/h  — limit in force (0 = unknown)
 SIGN_SEEN = "sign_seen"              # str   — class id of a sign just passed,
-                                     #         e.g. "no_overtaking"
+                                     #         e.g. "speed_limit_60"
 
 # --- ADAS / health (consumed by adas/display) -----------------------------
 # Producers send these on every cycle; the display treats the ADAS as offline

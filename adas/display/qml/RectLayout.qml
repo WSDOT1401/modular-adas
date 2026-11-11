@@ -163,8 +163,9 @@ Item {
             spacing: 32
             Row {
                 visible: st.signFresh
+                height: 112   // keeps the words centred when only they show
                 spacing: 16
-                SignIcon { size: 112; kind: st.signSeen }
+                SignIcon { size: 112; kind: st.signSeen; visible: !Theme.isLimitSign(st.signSeen) }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: Theme.signLabel(st.signSeen)

@@ -21,7 +21,7 @@
     "fcw_ttc":     { "type": "number", "minimum": 0, "description": "ADAS: time to collision, s (0 = unknown)" },
 
     "speed_limit": { "type": "number", "minimum": 0, "description": "ADAS: speed limit in force, km/h (0 = unknown)" },
-    "sign_seen":   { "type": "string", "description": "ADAS: class id of a sign just passed, e.g. no_overtaking" },
+    "sign_seen":   { "type": "string", "description": "ADAS: class id of a sign just passed, e.g. speed_limit_60" },
 
     "module_status": {
       "type": "object",

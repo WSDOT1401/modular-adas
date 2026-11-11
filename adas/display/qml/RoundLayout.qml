@@ -84,7 +84,8 @@ Item {
             width: 98; height: 98; radius: 49
             color: "transparent"
             border.width: 4
-            border.color: st.overspeed ? Theme.caution : "transparent"
+            border.color: st.overspeed ? Theme.caution
+                        : (st.signFresh && Theme.isLimitSign(st.signSeen) ? Theme.info : "transparent")
             SignIcon {
                 anchors.centerIn: parent
                 size: 84
@@ -94,7 +95,7 @@ Item {
             }
         }
         Rectangle {
-            visible: st.signFresh
+            visible: st.signFresh && !Theme.isLimitSign(st.signSeen)
             width: 98; height: 98; radius: 49
             color: "transparent"
             border.width: 4

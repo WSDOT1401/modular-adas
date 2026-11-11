@@ -16,8 +16,37 @@ Item {
     readonly property color rightColor: paused ? Theme.lineOff : (drift === "right" ? Theme.caution : Theme.line)
     readonly property real carShift: drift === "left" ? -72 : (drift === "right" ? 72 : 0)
 
+    // Lane lines in perspective: each is a filled outline that is widest at
+    // the bottom and thins to a hairline at the horizon (y 18). When paused
+    // the line breaks into dashes that are equally long on the road, so they
+    // shorten toward the horizon too.
+    readonly property real horizonY: 18
+    readonly property real depth: 242   // horizon to bottom edge
+    readonly property real lineWidth: 12
+    readonly property real driftLineWidth: 20
+
+    function lanePath(xTop, xBottom, widthBottom, dashed) {
+        const half = d => (1 + (widthBottom - 1) * d / depth) / 2
+        const xAt = d => xTop + (xBottom - xTop) * d / depth
+        const pt = (x, d) => x.toFixed(2) + "," + (horizonY + d).toFixed(2)
+        // d is the distance below the horizon; d0 is the far end of a piece.
+        const piece = (d0, d1) => "M" + pt(xAt(d0) - half(d0), d0)
+            + " L" + pt(xAt(d0) + half(d0), d0)
+            + " L" + pt(xAt(d1) + half(d1), d1)
+            + " L" + pt(xAt(d1) - half(d1), d1) + " Z"
+        if (!dashed)
+            return piece(0, depth)
+        // On screen, distance below the horizon is depth / z for a point z
+        // road-units ahead (z = 1 at the bottom edge).
+        let path = ""
+        for (let z = 1; depth / (z + 0.35) > 3; z += 0.8)
+            path += piece(depth / (z + 0.35), depth / z) + " "
+        return path
+    }
+
     Shape {
         anchors.fill: parent
+        antialiasing: true   // smooth edges on the software renderer too
         layer.enabled: true
         layer.samples: 4
 
@@ -57,24 +86,22 @@ Item {
         }
         // lane lines
         ShapePath {
-            strokeColor: root.leftColor
-            strokeWidth: root.drift === "left" && !root.paused ? 8 : 4
-            strokeStyle: root.paused ? ShapePath.DashLine : ShapePath.SolidLine
-            dashPattern: [1.5, 2.25]
-            capStyle: ShapePath.RoundCap
-            fillColor: "transparent"
-            startX: 196; startY: 18
-            PathLine { x: 44; y: 260 }
+            strokeColor: "transparent"
+            fillColor: root.leftColor
+            PathSvg {
+                path: root.lanePath(196, 44,
+                    root.drift === "left" && !root.paused ? root.driftLineWidth : root.lineWidth,
+                    root.paused)
+            }
         }
         ShapePath {
-            strokeColor: root.rightColor
-            strokeWidth: root.drift === "right" && !root.paused ? 8 : 4
-            strokeStyle: root.paused ? ShapePath.DashLine : ShapePath.SolidLine
-            dashPattern: [1.5, 2.25]
-            capStyle: ShapePath.RoundCap
-            fillColor: "transparent"
-            startX: 244; startY: 18
-            PathLine { x: 396; y: 260 }
+            strokeColor: "transparent"
+            fillColor: root.rightColor
+            PathSvg {
+                path: root.lanePath(244, 396,
+                    root.drift === "right" && !root.paused ? root.driftLineWidth : root.lineWidth,
+                    root.paused)
+            }
         }
         // gap to the vehicle ahead
         ShapePath {
