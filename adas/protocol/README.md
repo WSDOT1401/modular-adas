@@ -10,25 +10,42 @@ strings (where one typo = silently dropped data).
 ## The vehicle-state channel — `udp://127.0.0.1:9100`
 
 UTF-8 JSON datagrams, `snake_case` keys, all fields optional (partial updates
-are fine). Today's consumer is the W124 Qt cluster, which parses them in
-`VehicleState::applyJson()`.
+are fine). Consumers: the ADAS display ([`adas/display`](../display/), parses
+them in `AdasState::applyJson()`) and a vehicle's own cluster (the W124 one
+reads the vehicle keys in `VehicleState::applyJson()`).
 
-| JSON key (snake_case) | Type | Unit / values | Qt property (camelCase) | Status |
+| JSON key | Type | Unit / values | Sent by | Read by |
 |---|---|---|---|---|
-| `speed` | number | km/h | `speed` | live |
-| `odo` | number | km | `odometer` | live |
-| `trip` | number | km (wraps at 1000) | `trip` | live |
-| `oil_temp` | number | °C | `oilTemp` | live |
-| `outside_temp` | number | °C | `outsideTemp` | live |
-| `voltage` | number | V | `voltage` | live |
-| `lane_warning` | boolean | departure detected | `laneWarningActive` | **proposed** |
-| `lane_direction` | string | `left`/`right`/`none` | `laneWarningDirection` | **proposed** |
-| `lane_confidence` | number | 0..1 | `laneConfidence` | **proposed** |
+| `speed` | number | km/h | any speed source | display, W124 cluster |
+| `odo` | number | km | speed sensor | W124 cluster |
+| `trip` | number | km (wraps at 1000) | speed sensor | W124 cluster |
+| `oil_temp` | number | °C | sensors | W124 cluster |
+| `outside_temp` | number | °C | sensors | W124 cluster |
+| `voltage` | number | V | sensors | W124 cluster |
+| `lane_warning` | boolean | departure detected | vision | display |
+| `lane_direction` | string | `left`/`right`/`none` | vision | display |
+| `lane_confidence` | number | 0..1 | vision | (liveness only) |
+| `fcw_warning` | boolean | collision risk ahead | vision | display |
+| `fcw_ttc` | number | s to collision, 0 = unknown | vision | display |
+| `lead_vehicle` | boolean | a vehicle ahead in our lane (we are following it) | vision | display |
+| `speed_limit` | number | km/h, 0 = unknown | vision (signs) | display |
+| `sign_seen` | string | sign class id, e.g. `speed_limit`, `stop`, `pedestrian_crossing`; for `speed_limit` the value goes in `speed_limit` | vision (signs) | display |
+| `module_status` | object | `{"lane"/"fcw"/"signs": "on"/"paused"/"off"}` | vision, every cycle | display |
+| `system_fault` | string | `""` or a fault id, e.g. `camera_blocked` | vision | display |
+| `input` | string | `rotate_cw`/`rotate_ccw`/`press`/`long_press` (one per event) | rotary encoder, buttons | display |
 
-> ⚠️ **Unknown keys are silently dropped.** The `lane_*` keys do nothing until
-> `VehicleState` gains the matching `Q_PROPERTY`s *and* parses the keys in
-> `applyJson()`. Sending them early is harmless. Translate snake_case ⇄
-> camelCase only at the `applyJson()` boundary.
+> ⚠️ **Unknown keys are silently dropped** by every consumer. Import the
+> constants from `adas_protocol` instead of typing key strings. Translate
+> snake_case ⇄ camelCase only at a consumer's `applyJson()` boundary.
+
+**ADAS heartbeat.** The display counts the ADAS as running only while ADAS
+keys keep arriving (3 s timeout), so the vision service should send
+`module_status` every cycle even when nothing is wrong.
+
+**More than one receiver.** A UDP port has one receiver. When two consumers
+run on one Pi (e.g. the W124 cluster on 9100 and the display on 9101), set
+`ADAS_UDP_TARGETS=127.0.0.1:9100,127.0.0.1:9101` for the producers;
+`UdpPublisher` then sends every datagram to each target.
 
 The machine-readable spec is [`schema/vehicle_state.schema.json`](schema/vehicle_state.schema.json)
 (`additionalProperties: false`, so validating a producer's payload against it
@@ -59,11 +76,19 @@ with UdpPublisher() as pub:               # defaults to 127.0.0.1:9100
     pub.send({LANE_WARNING: True, LANE_DIRECTION: "left"})
 ```
 
-## Consumer (C++) — adding the ADAS keys
+## Adding a key
 
-To make the `lane_*` keys live, on the Qt side:
-1. add `laneWarningActive` / `laneWarningDirection` / `laneConfidence` `Q_PROPERTY`s to `VehicleState`,
-2. parse the three keys in `applyJson()`,
-3. bind them in QML to render the alert.
+1. Add the constant to [`keys.py`](python/adas_protocol/keys.py) and its entry to
+   the [schema](schema/vehicle_state.schema.json);
+   `tests/test_protocol.py` fails until both agree.
+2. Parse it in the consumer that needs it (for the display,
+   `AdasState::applyJson()` in `adas/display/src/AdasState.cpp`).
 
 Keep the spellings identical to this schema.
+
+## Test
+
+```bash
+pip install -e adas/protocol/python pytest
+python -m pytest adas/protocol/tests
+```

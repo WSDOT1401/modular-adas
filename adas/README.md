@@ -9,6 +9,7 @@ The W124 integration that uses it lives in its own repository,
 |---|---|
 | `protocol/` | The message contract: key names, JSON schema and the UDP publisher (`adas_protocol` Python package). Every producer and consumer agrees on this and nothing else. |
 | `vision/` | The ADAS vision service: camera capture, scheduler, lane departure, traffic signs (signs and most CV stages are still stubs). |
+| `display/` | The driver display (Qt Quick): every alert on a round or 4:3 screen, the shape chosen in its settings; plus the rotary-encoder reader and a bench demo sender. |
 | `experiments/` | Research and prototypes that feed the modules: object-detection benchmarks, distance estimation, traffic-sign training and the auto-label pipeline. Not run in the car. |
 | `models/` | Model-weight manifests (what to fetch and its checksum; the weights themselves are never committed). |
 | `tests/` | Cross-module tests (end to end; placeholder). Unit tests sit beside the code they test. |
