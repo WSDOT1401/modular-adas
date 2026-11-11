@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Shapes
 
 // Banner icon for the 4:3 layout: a triangle for caution/warning, an "i" for
-// info, a crossed-out camera for system faults. Nothing for "none".
+// info. Nothing for "none" or "system" (the layouts draw CameraOffIcon).
 Item {
     id: root
     property string level: "none"
@@ -48,30 +48,9 @@ Item {
             anchors.centerIn: parent
             text: "i"
             color: root.color
+            font.capitalization: Font.MixedCase
             font.pixelSize: 18
             font.weight: Font.Bold
-        }
-    }
-
-    Item {
-        visible: root.level === "system"
-        anchors.fill: parent
-        Rectangle {
-            x: 3; y: 9; width: 28; height: 20; radius: 4
-            color: "transparent"
-            border.color: root.color
-            border.width: 3
-        }
-        Rectangle {
-            x: 11; y: 13; width: 12; height: 12; radius: 6
-            color: "transparent"
-            border.color: root.color
-            border.width: 3
-        }
-        Rectangle {
-            x: 2; y: 16; width: 30; height: 3
-            rotation: 45
-            color: root.color
         }
     }
 }

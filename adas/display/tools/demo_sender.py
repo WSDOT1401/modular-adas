@@ -45,6 +45,7 @@ CHANGES = {
         SYSTEM_FAULT: "camera_blocked",
         MODULE_STATUS: {"lane": "paused", "fcw": "paused", "signs": "paused"},
     },
+    "feature_off": {MODULE_STATUS: {"lane": "off", "fcw": "on", "signs": "on"}},
 }
 
 

@@ -26,6 +26,8 @@ set(QML_SOURCES
     qml/RectLayout.qml
     qml/LaneView.qml
     qml/CarRear.qml
+    qml/FeatureIcon.qml
+    qml/CameraOffIcon.qml
     qml/SignIcon.qml
     qml/AlertIcon.qml
     qml/SettingsMenu.qml

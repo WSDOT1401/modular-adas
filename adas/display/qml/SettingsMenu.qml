@@ -76,13 +76,5 @@ Rectangle {
                 }
             }
         }
-        Text {
-            width: column.width
-            topPadding: 8
-            horizontalAlignment: Text.AlignHCenter
-            text: "Turn to choose · press to change · hold to close"
-            color: Theme.textDim
-            font.pixelSize: 15
-        }
     }
 }

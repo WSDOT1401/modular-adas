@@ -115,8 +115,9 @@ void AdasState::applyJson(const QJsonObject& obj) {
 }
 
 QString AdasState::moduleState(const QString& raw) const {
+    // No data: whatever the driver chose, nothing works right now.
     if (!m_adasOnline) {
-        return QStringLiteral("off");
+        return QStringLiteral("paused");
     }
     if (raw == QLatin1String("on") || raw == QLatin1String("paused")) {
         return raw;

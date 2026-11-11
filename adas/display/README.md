@@ -19,7 +19,7 @@ rotary encoder ─┘  {"input": "press"}, ...
 
 | Comes from | Keys | Notes |
 |---|---|---|
-| Vision service (`adas/vision`) | `lane_warning`, `lane_direction`, `fcw_warning`, `fcw_ttc`, `speed_limit`, `sign_seen`, `module_status`, `system_fault` | Send `module_status` every cycle: if no ADAS key arrives for 3 s the display shows **ADAS not running** and treats every module as off. |
+| Vision service (`adas/vision`) | `lane_warning`, `lane_direction`, `fcw_warning`, `fcw_ttc`, `speed_limit`, `sign_seen`, `module_status`, `system_fault` | Send `module_status` every cycle: if no ADAS key arrives for 3 s the rim turns dashed and every feature icon shows as unavailable. |
 | Any speed source | `speed` | A gearbox sender, GPS, OBD or IMU-based estimate; whoever has it publishes it. Stale after 3 s, then shown as `--`. |
 | Driver controls | `input` = `rotate_cw`, `rotate_ccw`, `press`, `long_press` | The rotary encoder script below, a steering-wheel button, or a test script. |
 
@@ -34,16 +34,40 @@ check they agree), parse it in `AdasState::applyJson()`
 
 ## What the driver sees
 
+Every letter is a capital, and only three alerts are spelled out: **BRAKE**,
+**CAMERA VIEW BLOCKED** and **OVERSPEED**. Everything else is shown, not
+written.
+
 Producers report facts; [`AdasState`](src/AdasState.h) decides which one is
 shown. One alert at a time, highest first:
 
 | Level | Colour | Reason | Round | 4:3 |
 |---|---|---|---|---|
-| Warning | red | vehicle ahead (`fcw`) | whole rim pulses, **BRAKE** replaces the speed | red banner, frame pulses |
-| System | grey | ADAS not running, fault (e.g. camera blocked) | dashed rim, dashed lane lines | grey banner |
-| Caution | amber | drifting left/right | rim lights on that side | amber banner |
-| Caution | amber | over the limit (> limit + 2 km/h) | rim lights above the sign, speed turns amber | amber banner |
-| Info | blue | sign just read (shown 8 s) | sign appears beside the limit | blue banner, "Signs seen" |
+| Warning | red | vehicle ahead (`fcw`) | whole rim pulses, **BRAKE** replaces the speed | red **BRAKE** banner, frame pulses |
+| System | grey | ADAS not running, fault | dashed rim, dashed lane lines, grey car | grey banner |
+| System | grey | camera blocked or not found | as above, plus a struck-through camera over the road and **CAMERA VIEW BLOCKED** | as above, plus the camera and **CAMERA VIEW BLOCKED** |
+| Caution | amber | drifting left/right | rim lights on that side, car slides toward the line | amber banner, car slides |
+| Caution | amber | over the limit (> limit + 2 km/h) | rim lights above the sign, speed turns amber, **OVERSPEED** | amber **OVERSPEED** banner |
+| Info | blue | sign just read (shown 8 s) | the sign appears ringed in blue (a new limit rings the limit sign) | blue banner, sign ringed in the strip |
+
+### Safety features in use
+
+Each feature can be switched on or off on its own, so the bottom of both
+layouts always shows the three of them, from `module_status`. The pictures
+follow what carmakers converge on for these telltales, and the colours follow
+the usual convention:
+
+| Icon ([`qml/FeatureIcon.qml`](qml/FeatureIcon.qml)) | Feature |
+|---|---|
+| our car from behind, between two lane lines | lane departure warning (`lane`) |
+| a car with an impact burst ahead of its nose | forward collision warning (`fcw`) |
+| a round sign and the camera reading it | traffic sign recognition (`signs`) |
+
+| State | Looks |
+|---|---|
+| `on` | green |
+| `paused`: on, but unavailable right now (camera blocked, ADAS not running) | amber |
+| `off`: switched off by the driver | grey, struck through |
 
 Timings and the overspeed margin are constants at the top of `AdasState.h`;
 words and colours live in [`qml/Theme.qml`](qml/Theme.qml).
@@ -139,7 +163,7 @@ it sends to 9101 as well, the display shows `--` for speed.
 ## Not done yet
 
 - The vision service doesn't send the collision, sign, module-status or fault
-  keys yet (those stages are stubs), so on the car the display reads
-  **ADAS not running** until it does. Use `tools/demo_sender.py` meanwhile.
+  keys yet (those stages are stubs), so on the car the rim stays dashed and
+  every feature icon amber until it does. Use `tools/demo_sender.py` meanwhile.
 - No sound. Collision warnings in particular should chime.
 - Turning the encoder while driving does nothing yet.

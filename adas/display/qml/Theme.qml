@@ -21,6 +21,8 @@ QtObject {
     readonly property color system: "#C4CBD1"
 
     readonly property color signRed: "#E0261B"
+    // A safety feature switched on and working (telltale green).
+    readonly property color active: "#4FD08A"
 
     function levelColor(level) {
         switch (level) {
@@ -32,7 +34,7 @@ QtObject {
         }
     }
 
-    // 4:3 banner: background, title and detail colours per level.
+    // 4:3 banner: background and foreground colours per level.
     function bannerBg(level) {
         switch (level) {
         case "info": return "#0D1B26"
@@ -50,16 +52,6 @@ QtObject {
         default: return "#E6EBEF"
         }
     }
-    function bannerSub(level) {
-        switch (level) {
-        case "info": return "#8FB6D4"
-        case "caution": return "#3D2A00"
-        case "warning": return "#3A0A0A"
-        case "system": return "#9AA3AB"
-        default: return textDim
-        }
-    }
-
     // A speed-limit sign: the detector's single "speed_limit" class (the
     // number travels separately, in speed_limit), or an id with the value in
     // it, "speed_limit_60". The layouts light up
@@ -86,54 +78,14 @@ QtObject {
         return words.charAt(0).toUpperCase() + words.slice(1)
     }
 
-    function faultText(id) {
-        switch (id) {
-        case "camera_blocked": return "Camera view blocked"
-        case "camera_lost": return "Camera not found"
-        case "overheating": return "Computer too hot"
-        default: return "ADAS fault"
-        }
-    }
+    // The camera can't see: blocked, or not found at all.
+    function isCameraFault(id) { return id === "camera_blocked" || id === "camera_lost" }
 
-    function ttcText(s) {
-        return s.fcwTtc > 0 ? "Time to collision " + s.fcwTtc.toFixed(1) + " s" : "Brake now"
-    }
-
-    // The line under the road view (round) and the banner (4:3).
+    // The only alerts spelled out. Everything else is shown, not written:
+    // the rim, the road view and the feature icons carry it.
     function title(s) {
-        switch (s.reason) {
-        case "fcw": return "Vehicle ahead"
-        case "lane_left": return "Drifting left"
-        case "lane_right": return "Drifting right"
-        case "overspeed": return "Over the limit"
-        case "sign":
-            if (s.signSeen === "speed_limit" && s.speedLimit > 0) return "Speed limit " + s.speedLimit
-            return signLabel(s.signSeen)
-        case "fault": return faultText(s.systemFault)
-        case "adas_offline": return "ADAS not running"
-        default: return ""
-        }
-    }
-    function detail(s) {
-        switch (s.reason) {
-        case "fcw": return ttcText(s)
-        case "lane_left":
-        case "lane_right": return "Steer back into your lane"
-        case "overspeed": return Math.round(s.speed - s.speedLimit) + " km/h above " + s.speedLimit
-        case "sign": return "Sign just passed"
-        case "fault": return "Lane, collision and sign alerts paused"
-        case "adas_offline": return "No data from the vision service"
-        default: return ""
-        }
-    }
-    function bannerTitle(s) {
-        if (s.reason === "fcw") return "BRAKE"
-        if (s.reason === "none") return "ADAS active"
-        return title(s)
-    }
-    function bannerDetail(s) {
-        if (s.reason === "fcw") return "Vehicle ahead · " + ttcText(s).toLowerCase()
-        if (s.reason === "none") return "Watching lanes, traffic ahead and signs"
-        return detail(s)
+        if (s.reason === "fault" && isCameraFault(s.systemFault)) return "CAMERA VIEW BLOCKED"
+        if (s.reason === "overspeed") return "OVERSPEED"
+        return ""
     }
 }

@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Shapes
 
 // Round screen, designed at 720×720 (Main.qml scales it to the real panel).
-// Alerts live on the rim and in the line under the road view.
+// Alerts live on the rim and in the road view; only CAMERA VIEW BLOCKED and
+// OVERSPEED are spelled out. The bottom row shows which features are in use.
 Item {
     id: root
     required property var st          // AdasState
@@ -156,17 +157,42 @@ Item {
         paused: root.paused
     }
 
-    // ---- alert text: one line, big enough to read at a glance ---------------
+    // camera can't see: a struck-through camera over the road
+    Rectangle {
+        visible: st.reason === "fault" && Theme.isCameraFault(st.systemFault)
+        x: 360 - width / 2
+        y: 324
+        width: 108; height: 108; radius: 54
+        color: Theme.bg
+        border.color: Theme.track
+        border.width: 3
+        CameraOffIcon {
+            anchors.centerIn: parent
+            size: 76
+        }
+    }
+
+    // ---- alert text: only CAMERA VIEW BLOCKED and OVERSPEED are spelled out --
     Text {
         x: 140
-        y: 580
+        y: 570
         width: 440
-        visible: st.level !== "none"
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
         text: Theme.title(st)
         color: Theme.levelColor(st.level)
-        font.pixelSize: 34
-        font.weight: Font.Medium
+        font.pixelSize: 30
+        font.weight: Font.DemiBold
+        font.letterSpacing: 1
+    }
+
+    // ---- safety features in use -----------------------------------------
+    Row {
+        y: 620
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: 34
+        FeatureIcon { feature: "lane"; status: st.moduleLane; size: 50 }
+        FeatureIcon { feature: "fcw"; status: st.moduleFcw; size: 50 }
+        FeatureIcon { feature: "signs"; status: st.moduleSigns; size: 50 }
     }
 }

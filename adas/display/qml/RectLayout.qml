@@ -1,8 +1,9 @@
 import QtQuick
 
 // 4:3 screen, designed at 960×720 (Main.qml scales it to the real panel).
-// The extra width buys a full-width alert banner, a module status list and a
-// strip of recently read signs.
+// The extra width buys a full-width alert banner, the safety features in use
+// and a strip of recently read signs. Only BRAKE, CAMERA VIEW BLOCKED and
+// OVERSPEED are spelled out.
 Item {
     id: root
     required property var st          // AdasState
@@ -33,27 +34,27 @@ Item {
         Row {
             x: 32
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 16
+            spacing: 18
+            CameraOffIcon {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: st.reason === "fault" && Theme.isCameraFault(st.systemFault)
+                size: 44
+                color: Theme.bannerFg(st.level)
+                bg: Theme.bannerBg(st.level)
+            }
             AlertIcon {
                 anchors.verticalCenter: parent.verticalCenter
-                visible: st.level !== "none"
+                visible: st.level !== "none" && st.level !== "system"
                 level: st.level
                 color: Theme.bannerFg(st.level)
             }
             Text {
-                anchors.baseline: detailText.baseline
-                text: Theme.bannerTitle(st)
-                color: Theme.bannerFg(st.level)
-                font.pixelSize: 30
-                font.weight: Font.DemiBold
-                font.letterSpacing: 0.6
-            }
-            Text {
-                id: detailText
                 anchors.verticalCenter: parent.verticalCenter
-                text: Theme.bannerDetail(st)
-                color: Theme.bannerSub(st.level)
-                font.pixelSize: 20
+                text: root.fcw ? "BRAKE" : Theme.title(st)
+                color: Theme.bannerFg(st.level)
+                font.pixelSize: 32
+                font.weight: Font.DemiBold
+                font.letterSpacing: 1
             }
         }
     }
@@ -96,37 +97,14 @@ Item {
             font.letterSpacing: 2
         }
     }
-    Column {
+    // safety features in use: green on, amber unavailable, struck-through off
+    Row {
         x: 32
-        y: 584
-        width: 252
-        spacing: 12
-        Repeater {
-            model: [
-                { name: "Lane departure", state: st.moduleLane },
-                { name: "Forward collision", state: st.moduleFcw },
-                { name: "Sign reading", state: st.moduleSigns }
-            ]
-            delegate: Row {
-                required property var modelData
-                width: 252
-                spacing: 12
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 12; height: 12; radius: 6
-                    color: modelData.state === "on" ? "#E6EBEF" : "transparent"
-                    border.width: 2
-                    border.color: modelData.state === "on" ? "#E6EBEF" : Theme.muted
-                }
-                // filled dot = on, hollow = paused or off
-                Text {
-                    width: 252 - 12 - 12
-                    text: modelData.name
-                    color: modelData.state === "on" ? Theme.text : Theme.textDim
-                    font.pixelSize: 18
-                }
-            }
-        }
+        y: 600
+        spacing: 30
+        FeatureIcon { feature: "lane"; status: st.moduleLane; size: 64 }
+        FeatureIcon { feature: "fcw"; status: st.moduleFcw; size: 64 }
+        FeatureIcon { feature: "signs"; status: st.moduleSigns; size: 64 }
     }
 
     // ---- road ------------------------------------------------------------
@@ -146,6 +124,20 @@ Item {
             lead: st.fcwWarning
             paused: root.paused
         }
+        // camera can't see: a struck-through camera over the road
+        Rectangle {
+            visible: st.reason === "fault" && Theme.isCameraFault(st.systemFault)
+            x: parent.width / 2 - width / 2
+            y: 56
+            width: 132; height: 132; radius: 66
+            color: Theme.bg
+            border.color: Theme.track
+            border.width: 3
+            CameraOffIcon {
+                anchors.centerIn: parent
+                size: 92
+            }
+        }
     }
 
     // ---- signs seen --------------------------------------------------------
@@ -156,25 +148,27 @@ Item {
         height: 176
         radius: 14
         color: Theme.panel
-        // The signs themselves, newest first; the words are kept big.
+        // The signs themselves, newest first; a newly read one ringed blue.
         Row {
             x: 24
             anchors.verticalCenter: parent.verticalCenter
             spacing: 32
-            Row {
-                visible: st.signFresh
-                height: 112   // keeps the words centred when only they show
-                spacing: 16
-                SignIcon { size: 112; kind: st.signSeen; visible: !Theme.isLimitSign(st.signSeen) }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: Theme.signLabel(st.signSeen)
-                    color: "#9CD3FF"
-                    font.pixelSize: 24
-                    font.weight: Font.Medium
-                }
+            Rectangle {
+                visible: st.signFresh && !Theme.isLimitSign(st.signSeen)
+                width: 124; height: 124; radius: 62
+                anchors.verticalCenter: parent.verticalCenter
+                color: "transparent"
+                border.width: 4
+                border.color: Theme.info
+                SignIcon { anchors.centerIn: parent; size: 108; kind: st.signSeen }
             }
-            SignIcon { size: 112; kind: "limit"; value: st.speedLimit; dim: st.speedLimit <= 0 }
+            Rectangle {
+                width: 124; height: 124; radius: 62
+                color: "transparent"
+                border.width: 4
+                border.color: st.signFresh && Theme.isLimitSign(st.signSeen) ? Theme.info : "transparent"
+                SignIcon { anchors.centerIn: parent; size: 108; kind: "limit"; value: st.speedLimit; dim: st.speedLimit <= 0 }
+            }
         }
     }
 

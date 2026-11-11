@@ -3,7 +3,7 @@
 // Bench scenarios, matching tools/demo_sender.py. Each is a full datagram, so
 // replaying one every second also keeps the ADAS "online".
 
-var names = ["cruise", "lane_left", "lane_right", "fcw", "overspeed", "new_sign", "fault"]
+var names = ["cruise", "lane_left", "lane_right", "fcw", "overspeed", "new_sign", "fault", "feature_off"]
 
 function payload(name) {
     var p = {
@@ -31,6 +31,8 @@ function payload(name) {
         p.speed = 80; p.system_fault = "camera_blocked"
         p.module_status = { lane: "paused", fcw: "paused", signs: "paused" }
         break
+    case "feature_off":
+        p.module_status = { lane: "off", fcw: "on", signs: "on" }; break
     }
     return JSON.stringify(p)
 }
