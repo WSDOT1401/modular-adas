@@ -81,11 +81,12 @@ Needs Qt 6.5 or newer (the same as the W124 cluster). Check with
 
 ```bash
 sudo apt install -y cmake build-essential qt6-base-dev qt6-declarative-dev \
-  qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtcore
+  qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtcore \
+  qt6-wayland
 pip install -e adas/protocol/python             # from the repo root
 
 cd adas/display
-cmake -S . -B build && cmake --build build -j
+cmake -S . -B build && cmake --build build -j2   # not plain -j: it runs every job at once and the Pi runs out of memory
 ./build/adas_display                            # full screen, listens on UDP 9100
 ```
 
@@ -103,9 +104,11 @@ Options: `--shape round|rect` (overrides the saved setting), `--windowed`,
 `--port N`, `--scenario NAME|cycle`, `--snapshot out.png` (render, save, quit;
 handy for checking a layout change).
 
-Fonts: the design uses [Jost](https://fonts.google.com/specimen/Jost) (free,
-Futura-like). Put its `.ttf` files in `assets/fonts/`; without them the
-system font is used.
+Font: [B612](https://github.com/polarsys/b612), designed for Airbus cockpit
+displays to be read at a glance (SIL Open Font License, in
+`assets/fonts/OFL.txt`). It is built into the binary, so nothing needs
+installing on the Pi. To change it, replace the `.ttf`/`.otf` files in
+`assets/fonts/` and rebuild.
 
 ### Start at boot
 

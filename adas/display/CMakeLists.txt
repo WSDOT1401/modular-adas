@@ -48,6 +48,18 @@ qt_add_qml_module(adas_display
     QML_FILES ${QML_SOURCES}
 )
 
+# The UI font, built into the binary so the Pi needs no font installed. Every
+# .ttf/.otf in assets/fonts/ is embedded; to change the font, swap the files
+# there (keep the licence next to them) and rebuild.
+file(GLOB FONT_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/*.ttf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/*.otf")
+foreach(font_file IN LISTS FONT_FILES)
+    get_filename_component(font_name ${font_file} NAME)
+    set_source_files_properties(${font_file} PROPERTIES QT_RESOURCE_ALIAS fonts/${font_name})
+endforeach()
+qt_add_resources(adas_display "fonts" PREFIX "/" FILES ${FONT_FILES})
+
 target_link_libraries(adas_display PRIVATE Qt6::Quick Qt6::Network)
 
 install(TARGETS adas_display RUNTIME DESTINATION bin)

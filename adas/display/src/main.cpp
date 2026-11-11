@@ -12,27 +12,22 @@
 
 #include "AdasState.h"
 
-// The design uses Jost (a free Futura-like face); a Futura file works too.
-// Drop a .ttf/.otf into assets/fonts/ next to the binary or the source tree.
+// The UI font (B612, made for cockpit displays) is built into the binary from
+// assets/fonts/ (see CMakeLists.txt). Returns its family, or "" if none is
+// embedded, in which case the system font is used.
 static QString loadBundledFont() {
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QStringList dirs = {
-        appDir + "/assets/fonts",
-        appDir + "/../assets/fonts",
-        QDir::currentPath() + "/assets/fonts",
-    };
-    const QStringList patterns = {"Jost*.ttf", "Jost*.otf", "Futura*.ttf", "Futura*.otf"};
+    const QDir dir(QStringLiteral(":/fonts"));
     QString family;
-    for (const QString& dirPath : dirs) {
-        const QDir dir(dirPath);
-        for (const QFileInfo& fi : dir.entryInfoList(patterns, QDir::Files, QDir::Name)) {
-            const int id = QFontDatabase::addApplicationFont(fi.absoluteFilePath());
-            const QStringList fams = QFontDatabase::applicationFontFamilies(id);
-            if (family.isEmpty() && !fams.isEmpty()) family = fams.first();
+    for (const QFileInfo& fi : dir.entryInfoList({"*.ttf", "*.otf"}, QDir::Files, QDir::Name)) {
+        const int id = QFontDatabase::addApplicationFont(fi.absoluteFilePath());
+        if (id < 0) {
+            qWarning("could not load font %s", qPrintable(fi.fileName()));
+            continue;
         }
-        if (!family.isEmpty()) return family;
+        const QStringList fams = QFontDatabase::applicationFontFamilies(id);
+        if (family.isEmpty() && !fams.isEmpty()) family = fams.first();
     }
-    return QString();
+    return family;
 }
 
 int main(int argc, char* argv[]) {
