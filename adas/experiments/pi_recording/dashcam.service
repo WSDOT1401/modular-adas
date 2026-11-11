@@ -1,0 +1,13 @@
+[Unit]
+Description=Dashcam: Pi camera -> ~/footage (see record.sh)
+# never give up restarting (the default stops after 5 fails in 10 s, e.g. camera not ready at boot)
+StartLimitIntervalSec=0
+
+[Service]
+User=w124
+ExecStart=/home/w124/modular-adas/adas/experiments/pi_recording/record.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

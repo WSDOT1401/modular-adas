@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adas-protocol"
+version = "0.1.0"
+description = "Shared IPC contract (UDP vehicle-state schema + publisher) between vehicle data, ADAS modules and the display"
+requires-python = ">=3.9"
+
+# Install editable from the repo root so every service shares one copy:
+#   pip install -e adas/protocol/python
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["adas_protocol*"]
