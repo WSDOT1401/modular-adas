@@ -48,5 +48,8 @@ __pycache__/
 # --- AI assistant local guidance (not committed) ---
 CLAUDE.md
 
+# --- Secrets: never commit, wherever they sit ---
+.env
+
 # ADAS-specific rules (weights, datasets, footage, editable installs) live
 # next to their files in adas/.gitignore.
