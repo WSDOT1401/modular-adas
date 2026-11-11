@@ -60,19 +60,25 @@ QtObject {
         }
     }
 
-    // A speed-limit sign id such as "speed_limit_60". The layouts light up
+    // A speed-limit sign: the detector's single "speed_limit" class (the
+    // number travels separately, in speed_limit), or an id with the value in
+    // it, "speed_limit_60". The layouts light up
     // the limit sign itself instead of showing the same sign twice.
-    function isLimitSign(id) { return /^speed_limit_[0-9]+$/.test(id || "") }
+    function isLimitSign(id) { return /^speed_limit(_[0-9]+)?$/.test(id || "") }
 
-    // Sign class ids (adas/vision) to words. Unknown ids are shown tidied up.
+    // Sign class ids to words. The ids are the Thai fine classes in
+    // adas/experiments/traffic-sign_recognition/classes.py; any other id is
+    // shown tidied up ("left_curve" -> "Left curve").
     function signLabel(id) {
-        if (isLimitSign(id)) return "Speed limit " + id.slice(12)
+        if (isLimitSign(id)) return id.length > 12 ? "Speed limit " + id.slice(12) : "Speed limit"
         const names = {
-            "stop": "Stop",
-            "give_way": "Give way",
-            "no_entry": "No entry",
-            "no_u_turn": "No U-turn",
-            "no_parking": "No parking"
+            "no_right_u_turn": "No U-turn",
+            "no_stopping_parking": "No stopping",
+            "keep_left_or_right": "Keep left or right",
+            "reserved_for_bus": "Bus lane",
+            "t_junction_left": "Junction on the left",
+            "t_junction_right": "Junction on the right",
+            "u_turn": "U-turn ahead"
         }
         if (names[id] !== undefined) return names[id]
         if (!id) return ""
@@ -100,7 +106,9 @@ QtObject {
         case "lane_left": return "Drifting left"
         case "lane_right": return "Drifting right"
         case "overspeed": return "Over the limit"
-        case "sign": return signLabel(s.signSeen)
+        case "sign":
+            if (s.signSeen === "speed_limit" && s.speedLimit > 0) return "Speed limit " + s.speedLimit
+            return signLabel(s.signSeen)
         case "fault": return faultText(s.systemFault)
         case "adas_offline": return "ADAS not running"
         default: return ""

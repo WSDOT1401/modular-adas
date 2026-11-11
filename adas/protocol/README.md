@@ -28,7 +28,7 @@ reads the vehicle keys in `VehicleState::applyJson()`).
 | `fcw_warning` | boolean | collision risk ahead | vision | display |
 | `fcw_ttc` | number | s to collision, 0 = unknown | vision | display |
 | `speed_limit` | number | km/h, 0 = unknown | vision (signs) | display |
-| `sign_seen` | string | sign class id, e.g. `speed_limit_60`, `stop` | vision (signs) | display |
+| `sign_seen` | string | sign class id, e.g. `speed_limit`, `stop`, `pedestrian_crossing`; for `speed_limit` the value goes in `speed_limit` | vision (signs) | display |
 | `module_status` | object | `{"lane"/"fcw"/"signs": "on"/"paused"/"off"}` | vision, every cycle | display |
 | `system_fault` | string | `""` or a fault id, e.g. `camera_blocked` | vision | display |
 | `input` | string | `rotate_cw`/`rotate_ccw`/`press`/`long_press` (one per event) | rotary encoder, buttons | display |

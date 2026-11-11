@@ -39,7 +39,7 @@ CHANGES = {
     "lane_right": {SPEED: 84, LANE_WARNING: True, LANE_DIRECTION: "right"},
     "fcw": {SPEED: 76, FCW_WARNING: True, FCW_TTC: 1.2},
     "overspeed": {SPEED: 103},
-    "new_sign": {SPEED: 58, SPEED_LIMIT: 60, SIGN_SEEN: "speed_limit_60"},
+    "new_sign": {SPEED: 58, SPEED_LIMIT: 60, SIGN_SEEN: "speed_limit"},
     "fault": {
         SPEED: 80,
         SYSTEM_FAULT: "camera_blocked",
