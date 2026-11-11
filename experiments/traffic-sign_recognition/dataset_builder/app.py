@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import shutil
 import threading
 import traceback
 
@@ -101,10 +102,18 @@ def index():
         if _ensure_meta(data, footage_dir):
             progress.save(progress_path, data)
     rows = catalog.describe(footage_dir, workspace_dir, data)
+    archived_tab = request.args.get("tab") == "archived"
     target = max(1, int(data.get("target_frames") or progress.DEFAULT_TARGET))
     selected = progress.total_selected(data)
     return render_template(
-        "index.html", videos=rows, target=target, selected=selected,
+        "index.html",
+        # Only the table is filtered. The totals below stay whole-catalog: those
+        # frames were really curated, so tidying up must not make the number drop.
+        videos=[r for r in rows if r["archived"] == archived_tab],
+        archived_tab=archived_tab,
+        tabs={"archived": sum(1 for r in rows if r["archived"]),
+              "active": sum(1 for r in rows if not r["archived"])},
+        target=target, selected=selected,
         downloaded=progress.total_downloaded(data),
         pct=min(100, round(100 * selected / target)),
         footage_dir=footage_dir,
@@ -125,6 +134,95 @@ def set_target():
         data["target_frames"] = max(1, target)
         progress.save(progress_path, data)
     return redirect(url_for("index"))
+
+
+@app.post("/archive")
+def archive_videos():
+    """Move the ticked clips between the Active and Archived tabs.
+
+    Nothing happens on disk: archiving sets a flag, so the frame cache, the
+    selections and the file itself are untouched and the button on the other tab
+    puts them straight back. Which way it goes is the tab you pressed it from.
+    """
+    footage_dir, _, progress_path = _paths()
+    tab = request.form.get("tab")
+    archived = tab != "archived"
+    with _notebook_lock:
+        data = progress.load(progress_path)
+        for name in request.form.getlist("name"):
+            if catalog.resolve(footage_dir, name) is None:
+                continue                      # gone from footage/; nothing to file
+            record = progress.entry(data, name)
+            if archived:
+                record["archived"] = True
+            else:
+                record.pop("archived", None)  # popped, not False: the notebook is committed
+        progress.save(progress_path, data)
+    return redirect(url_for("index", tab=tab or None))
+
+
+@app.post("/delete")
+def delete_videos():
+    """Move unwanted clips to the Trash, with their frame cache and notebook row.
+
+    The video is trashed rather than unlinked: this is a one-click action on
+    original footage, so it has to be undoable from Finder. The frame cache is
+    not -- it is derived, and the README already calls it safe to delete.
+    """
+    footage_dir, workspace_dir, progress_path = _paths()
+    with _notebook_lock:
+        data = progress.load(progress_path)
+        for name in request.form.getlist("name"):
+            path = catalog.resolve(footage_dir, name)
+            if path is None:
+                continue                      # already gone; nothing left to undo
+            catalog.trash(path)
+            shutil.rmtree(catalog.workspace_for(workspace_dir, name), ignore_errors=True)
+            data["videos"].pop(name, None)
+        progress.save(progress_path, data)
+    return redirect(url_for("index", tab=request.form.get("tab") or None))
+
+
+@app.post("/zip")
+def download_many():
+    """One zip for every clip you ticked, instead of one download per clip.
+
+    A clip you never curated contributes nothing and is skipped rather than
+    refused -- ticking the whole list to grab everything selected so far is the
+    point of the button. Each clip that does contribute gets its own download
+    recorded, exactly as the per-clip button would.
+    """
+    footage_dir, workspace_dir, progress_path = _paths()
+    data = progress.load(progress_path)
+    items = []
+    for name in request.form.getlist("name"):
+        if catalog.resolve(footage_dir, name) is None:
+            continue
+        out_dir = catalog.workspace_for(workspace_dir, name)
+        index_payload = extract.load_index(out_dir)
+        selected = sorted(data["videos"].get(name, {}).get("selected") or [])
+        if index_payload and selected:
+            items.append((name, index_payload, selected, out_dir / "full"))
+    if not items:
+        abort(409, "none of the clips you picked have frames selected")
+
+    # ponytail: one fixed path, rewritten per download. Two downloads at the same
+    # moment would clobber each other; this app serves one local user.
+    dest = pathlib.Path(workspace_dir) / "export.zip"
+    counts = export.build_many(items, dest)
+    if not counts:
+        abort(409, "selected frames are missing from the cache; re-extract")
+
+    with _notebook_lock:
+        fresh = progress.load(progress_path)
+        for name, _, selected, _ in items:
+            if name in counts:
+                progress.entry(fresh, name).setdefault("downloads", []).append(
+                    {"at": progress.now_iso(), "count": counts[name], "frames": selected[:]})
+        progress.save(progress_path, fresh)
+
+    return send_file(dest, as_attachment=True, mimetype="application/zip",
+                     download_name=export.bundle_name(sum(counts.values()), len(counts)))
 
 
 @app.route("/video/<path:name>")
@@ -274,7 +372,9 @@ def frame_image(name: str, kind: str, filename: str):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--port", type=int, default=5000)
+    # Not 5000: macOS AirPlay Receiver (ControlCenter) holds [::1]:5000, so a
+    # browser resolving localhost to IPv6 gets its 403 instead of this app.
+    parser.add_argument("--port", type=int, default=5001)
     parser.add_argument("--host", default="127.0.0.1",
                         help="localhost only by default; there is no auth")
     parser.add_argument("--footage", type=pathlib.Path, default=FOOTAGE_DIR)

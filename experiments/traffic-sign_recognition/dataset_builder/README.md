@@ -26,7 +26,7 @@ $CONDA/pip install -r requirements.txt      # flask; opencv is already there
 
 cp /path/to/*.MP4 footage/                  # 1. drop footage in
 $CONDA/python app.py                        # 2. run
-open http://127.0.0.1:5000                  # 3. work
+open http://127.0.0.1:5001                  # 3. work
 ```
 
 `mp4 · mov · avi · mkv · m4v · mts · m2ts · ts · webm`, case-insensitive.
@@ -37,6 +37,8 @@ open http://127.0.0.1:5000                  # 3. work
 footage/*.MP4
    │
    ├─ homepage        every clip, its state, and progress toward the target
+   │                  tick the clips you don't want, Move to Trash
+   │                  Active / Archived tabs to park clips you are done with
    │
    ├─ pick a clip  →  set an interval (default 2 s)  →  Extract
    │                  runs off-thread with a progress bar; a 20-minute
@@ -47,6 +49,8 @@ footage/*.MP4
    │                  resolution · time ruler to jump · every click autosaves
    │
    └─ Download ZIP →  ~/Downloads  →  upload to your labelling tool
+                      one clip from its own page, or tick several on the
+                      homepage for a single combined zip
 ```
 
 ## Progress tracking
@@ -114,6 +118,23 @@ Thumbnails are 768 px wide to match. A cache extracted before that change is
 upgraded in place, from the full-resolution JPEG already sitting next to it, the
 first time the browser asks for each one. No re-extract, about 30 ms per frame.
 
+**Downloading several clips at once.** Tick them on the homepage and press
+Download ZIP: one flat archive, one `manifest.csv` covering the lot. Frame files
+are already named `<clip stem>_f000123.jpg`, so frames from different clips
+cannot collide -- unless two clips share a stem (`run.mp4` and `run.MOV`), which
+already collides in the frame cache and is worth renaming. Ticked clips with
+nothing selected are skipped, and each clip that contributes gets its own
+download recorded, so the tick marks and `last download` column update as usual.
+
+**Archiving a clip.** Tick its box and press Archive to move it to the Archived
+tab; Restore brings it back. Nothing moves on disk -- it is one flag in
+`progress.json` -- so the frames, the selections and the file itself survive, and
+the frame count at the top of the page still includes archived clips.
+
+**Deleting a clip.** Tick its box on the homepage and press Move to Trash. The
+video goes to the macOS Trash, so a misclick is undone from Finder; its frame
+cache and its `progress.json` row are removed outright, since both are derived.
+
 **Interval.** Default 2 s. At 60 km/h that's ~33 m of road between frames — far
 enough apart to be genuinely different images. Stopped at a red light they will
 be near-identical no matter what interval you pick, so skip those stretches.
@@ -140,6 +161,10 @@ Both are constant across every frame from the same camera, so a detector can
 learn to ignore them — but cropping the bottom of the frame would remove both at
 once and give the model more useful pixels. Worth deciding before labelling
 starts, because it is expensive to change afterwards.
+
+**Port 5001, not 5000.** macOS AirPlay Receiver listens on `[::1]:5000`, so a
+browser that resolves `localhost` to IPv6 reaches AirPlay and shows `403
+Forbidden` instead of this app. Override with `--port` if 5001 is busy too.
 
 **Security.** Binds to `127.0.0.1` only. It reads and writes files on your
 machine with no authentication — do not expose it to a network.

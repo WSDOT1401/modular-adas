@@ -9,6 +9,7 @@ fails to match anything and 404s.
 from __future__ import annotations
 
 import pathlib
+import shutil
 
 from extract import VIDEO_SUFFIXES
 import progress
@@ -66,9 +67,33 @@ def describe(footage_dir, workspace_dir, data: dict) -> list[dict]:
                           or (index or {}).get("meta", {}).get("duration_s") or 0,
             "selected": len(record.get("selected") or []),
             "last_download": downloads[-1]["at"] if downloads else None,
+            # Archiving is a flag, not a move: the file stays put and the flag
+            # only decides which tab the row lands on.
+            "archived": bool(record.get("archived")),
             "download_count": len(downloads),
             # A cache wiped by hand must not leave the homepage claiming frames exist.
             "unreadable": bool((record.get("meta") or {}).get("error")),
             "stale": bool(record.get("extract")) and index is None,
         })
     return rows
+
+
+def trash(path) -> pathlib.Path:
+    """Move a file to the Trash rather than unlinking it.
+
+    Deleting a clip is one click on original footage that may not exist anywhere
+    else, so it goes somewhere Finder can put it back. With no ``~/.Trash`` it
+    lands in ``footage/.trash`` instead -- still recoverable, and still invisible
+    to :func:`list_videos`, which only ever counts files.
+    """
+    path = pathlib.Path(path)
+    bin_dir = pathlib.Path.home() / ".Trash"
+    if not bin_dir.is_dir():
+        bin_dir = path.parent / ".trash"
+        bin_dir.mkdir(exist_ok=True)
+    dest, n = bin_dir / path.name, 2
+    while dest.exists():                      # Finder's own "name 2.ext" shape
+        dest, n = bin_dir / f"{path.stem} {n}{path.suffix}", n + 1
+    # move, not rename: ~/.Trash is usually on a different volume from footage.
+    shutil.move(str(path), str(dest))
+    return dest
