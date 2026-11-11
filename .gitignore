@@ -128,3 +128,5 @@ train_log_*.txt
 # Beep/alert audio prototyping: ~20 generated wavs plus a notebook that is
 # still scratch. Promote it out of here when it becomes a service.
 experiments/sign_beep/
+experiments/pi_recording/footage-test
+experiments/pi_recording/footage
