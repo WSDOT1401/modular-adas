@@ -126,20 +126,16 @@ Item {
         glass: "#5A1410"
         trim: "#B8382C"
         tail: "#5A1410"
-        indicator: "#5A1410"
-        reverse: "#5A1410"
         details: false
     }
 
-    // our car (a W124), from behind and above, its wheels on the bottom edge
+    // our car, from behind and above, its wheels on the bottom edge
     CarRear {
         x: 220 - width / 2 + root.carShift
         y: 130
         body: root.paused ? Theme.lineOff : Theme.car
         trim: root.paused ? "#3A4148" : "#9AA2A9"
         tail: root.paused ? "#3A4148" : "#B3261E"
-        indicator: root.paused ? "#3A4148" : "#D98A1C"
-        reverse: root.paused ? "#4A525A" : "#D7DCE0"
         plate: root.paused ? "#5B636B" : "#F5F7F8"
         Behavior on x { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
     }
