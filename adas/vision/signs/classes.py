@@ -1,22 +1,22 @@
-"""Traffic-sign class labels and model-index mapping.
+"""Traffic-sign classes: which detector outputs the driver is told about.
 
-Single source of truth mapping the detector's numeric class ids to
-human-meaningful sign labels, kept separate from detection/tracking so the
-label set can evolve with the model without touching pipeline code.
-
-TODO: populate with the deployed model's classes (e.g. speed-limit values,
-stop, yield). Placeholder below.
+The class list itself is baked into the detector weights (``r.names`` in
+ultralytics), so there is no id -> name table to keep in sync. The names are
+the Thai fine classes from
+``adas/experiments/traffic-sign_recognition/classes.py`` (stop,
+pedestrian_crossing, speed_limit, ...); the display has a word for each.
 """
 from __future__ import annotations
 
-# model class id -> human label
-CLASS_LABELS: dict[int, str] = {
-    # 0: "speed_limit_30",
-    # 1: "stop",
-    # 2: "yield",
-}
+# The one class whose number is read separately (by the speed reader). It is
+# published as sign_seen "speed_limit", with the value in speed_limit.
+SPEED_LIMIT = "speed_limit"
+
+# Catch-alls: "clearly a sign, just not one we know". Telling the driver
+# "other regulatory sign" is noise, so these are never published.
+IGNORED = frozenset({"other_regulatory", "other_warning", "information"})
 
 
-def label_for(class_id: int) -> str:
-    """Human label for a detector class id (``"unknown"`` if unmapped)."""
-    return CLASS_LABELS.get(class_id, "unknown")
+def publishable(name: str) -> bool:
+    """True if a detection of this class should reach the display."""
+    return bool(name) and name not in IGNORED

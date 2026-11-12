@@ -121,6 +121,7 @@ it over UDP like the real thing:
 ```bash
 ./build/adas_display --scenario cycle           # built-in demo, no UDP
 python3 tools/demo_sender.py                    # real UDP path, all scenarios
+python3 tools/speed_sim.py                      # just a speed: town and highway driving
 python3 tools/demo_sender.py --scenario fcw     # hold one
 python3 input/rotary_encoder.py                 # the encoder, on the Pi
 ```
