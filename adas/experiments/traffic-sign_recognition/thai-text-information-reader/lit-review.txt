@@ -1,0 +1,14 @@
+paper | task | data | metric | what we take from it
+Recognizing Text-Based Traffic Guide Panels with Cascaded Localization Network | มันทำได้ | 
+Street Sign Recognition Algorithm Based on Deep Learning | มันทำได้ |
+Thai scene text recognition Chula | ?? | ?? | ?? | แล้วก็มันทำได้ |
+Sign Language: Towards Sign Understanding for Robot Autonomy | further understanding the navigation
+
+## Current Progress
+- Knowing that it's possible to create such a model that can read thai text, but hard part is how do we create such a dataset and evaluation method.
+- Surprisely we can augmented the dataset but we have to research further more on how was it accuracy.
+- Pipeline (roughly):
+  Information Crops Sign -> Line Segmentation -> OCR -> Text
+- Further things to do or research:
+    - how can we use it for more useful application (maybe with GPS but how)
+    - metrics and normalizing rule for dataset
