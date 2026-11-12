@@ -135,6 +135,22 @@ displays to be read at a glance (SIL Open Font License, in
 installing on the Pi. To change it, replace the `.ttf`/`.otf` files in
 `assets/fonts/` and rebuild.
 
+### More than one monitor
+
+The display goes full screen on one monitor only and hides the mouse pointer
+there. By default (`--screen auto`) it picks the square monitor when several
+are connected: a round panel reports itself as square, e.g. 720 × 720. To pin
+it to a monitor by name:
+
+```bash
+./build/adas_display --list-screens             # 0  HDMI-A-1  1600x900  (primary)
+                                                # 1  HDMI-A-2  720x720
+./build/adas_display --screen HDMI-A-2
+```
+
+If the round monitor doesn't show up as 720 × 720, set its mode in the Screen
+Configuration tool (or `wlr-randr --output HDMI-A-2 --mode 720x720`) first.
+
 ### Start at boot
 
 User services, like the W124 cluster's:

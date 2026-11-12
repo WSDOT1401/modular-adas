@@ -3,12 +3,15 @@
 // program never talks to hardware itself.
 
 #include <QCommandLineParser>
+#include <QCursor>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QScreen>
+#include <cstdio>
 
 #include "AdasState.h"
 
@@ -30,6 +33,29 @@ static QString loadBundledFont() {
     return family;
 }
 
+// Which monitor to use. `spec` is an output name as --list-screens prints it
+// (e.g. HDMI-A-2), a screen number, or "auto": with more than one monitor,
+// the first square one (a round panel reports itself as square), else the
+// primary. Returns an index into QGuiApplication::screens(), or -1.
+static int pickScreen(const QString& spec) {
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    if (spec != QLatin1String("auto")) {
+        for (int i = 0; i < screens.size(); ++i)
+            if (screens[i]->name() == spec) return i;
+        bool isNumber = false;
+        const int n = spec.toInt(&isNumber);
+        if (isNumber && n >= 0 && n < screens.size()) return n;
+        return -1;
+    }
+    if (screens.size() > 1) {
+        for (int i = 0; i < screens.size(); ++i) {
+            const QSize s = screens[i]->size();
+            if (s.width() == s.height()) return i;
+        }
+    }
+    return screens.indexOf(QGuiApplication::primaryScreen());
+}
+
 int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
     QGuiApplication::setOrganizationName(QStringLiteral("modular-adas"));
@@ -45,8 +71,27 @@ int main(int argc, char* argv[]) {
         "Play a built-in scenario instead of waiting for data: cruise, lane_left, lane_right, "
         "fcw, overspeed, new_sign, fault, feature_off, following, or cycle.", "name");
     const QCommandLineOption snapshotOpt("snapshot", "Save the screen to a PNG after start-up, then quit.", "file");
-    cli.addOptions({portOpt, shapeOpt, windowedOpt, scenarioOpt, snapshotOpt});
+    const QCommandLineOption screenOpt("screen",
+        "Monitor to run on: an output name from --list-screens (e.g. HDMI-A-2), a number, "
+        "or auto (default: the square monitor when there are several).", "name", "auto");
+    const QCommandLineOption listScreensOpt("list-screens", "Print the connected monitors and quit.");
+    cli.addOptions({portOpt, shapeOpt, windowedOpt, scenarioOpt, snapshotOpt, screenOpt, listScreensOpt});
     cli.process(app);
+
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    if (cli.isSet(listScreensOpt)) {
+        for (int i = 0; i < screens.size(); ++i) {
+            const QScreen* s = screens[i];
+            std::printf("%d  %-12s %dx%d%s\n", i, qPrintable(s->name()), s->size().width(),
+                        s->size().height(), s == QGuiApplication::primaryScreen() ? "  (primary)" : "");
+        }
+        return 0;
+    }
+    const int screenIndex = pickScreen(cli.value(screenOpt));
+    if (screenIndex < 0) {
+        qCritical("--screen %s: no such monitor (see --list-screens)", qPrintable(cli.value(screenOpt)));
+        return 2;
+    }
 
     const QString shape = cli.value(shapeOpt);
     if (!shape.isEmpty() && shape != QLatin1String("round") && shape != QLatin1String("rect")) {
@@ -71,12 +116,16 @@ int main(int argc, char* argv[]) {
 #else
     const bool fullScreen = false;  // desktop development
 #endif
+    // Full screen on the ADAS monitor: no pointer wandering over from the
+    // desktop monitor.
+    if (fullScreen) QGuiApplication::setOverrideCursor(Qt::BlankCursor);
 
     QQmlApplicationEngine engine;
     QQmlContext* ctx = engine.rootContext();
     ctx->setContextProperty(QStringLiteral("adas"), &state);
     ctx->setContextProperty(QStringLiteral("startupShape"), shape);
     ctx->setContextProperty(QStringLiteral("startFullScreen"), fullScreen);
+    ctx->setContextProperty(QStringLiteral("startupScreen"), screenIndex);
     ctx->setContextProperty(QStringLiteral("startupScenario"), cli.value(scenarioOpt));
     ctx->setContextProperty(QStringLiteral("snapshotPath"),
                             cli.isSet(snapshotOpt) ? QFileInfo(cli.value(snapshotOpt)).absoluteFilePath()

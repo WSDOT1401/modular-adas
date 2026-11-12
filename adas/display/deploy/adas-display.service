@@ -8,7 +8,9 @@ StartLimitIntervalSec=0
 Type=simple
 # %h is the home folder; edit if the repo is not at ~/modular-adas.
 WorkingDirectory=%h/modular-adas/adas/display
-ExecStart=%h/modular-adas/adas/display/build/adas_display
+# --screen picks the monitor: auto takes the square (round) one when several
+# are connected; or name it, e.g. --screen HDMI-A-2 (see --list-screens).
+ExecStart=%h/modular-adas/adas/display/build/adas_display --screen auto
 Restart=always
 RestartSec=2
 Environment=QT_QPA_PLATFORM=wayland

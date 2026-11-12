@@ -13,6 +13,9 @@ Window {
     readonly property real designH: 720
     property bool menuOpen: false
 
+    // The monitor chosen by --screen (main.cpp). Set before the window is shown,
+    // so full screen lands on that monitor.
+    screen: Qt.application.screens[startupScreen]
     width: designW
     height: designH
     visible: true
