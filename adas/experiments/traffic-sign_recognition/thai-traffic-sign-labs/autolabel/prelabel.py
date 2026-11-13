@@ -76,7 +76,36 @@ def iou(a, b) -> float:
     return inter / union if union > 0 else 0.0
 
 
+PARENTS = frozenset(classes.THAI_FINE_BY_PARENT)
+
+
+# ultralytics sizes its batch to the list it is handed, so 350 frames at imgsz
+# 1280 becomes one ~5 GB tensor. CPU swallows that slowly; MPS refuses it
+# outright ("Invalid buffer size") and its whole ceiling is about 5.3 GB.
+PREDICT_CHUNK = 16
+
+
+def chunked(seq, n=PREDICT_CHUNK):
+    return [seq[i:i + n] for i in range(0, len(seq), n)]
+
+
+def predict_all(model, paths, **kw):
+    """model.predict over many images, a handful at a time. See PREDICT_CHUNK."""
+    for part in chunked(paths):
+        yield from model.predict(source=part, stream=True, **kw)
+
+
 def catch_all(parent: str) -> str:
+    """The "some other sign of this kind" name for a coarse class.
+
+    An unknown parent means nothing recognised this box -- M1 is class-agnostic,
+    so every box it finds arrives as `sign`, a parent the VLM has no prompt for.
+    That is not a catch-all, it is a gap, and `dont_know` is the word for it:
+    `build` then drops the frame rather than teaching the detector that a real
+    sign is background. A human naming it in review.py is what clears it.
+    """
+    if parent not in PARENTS:
+        return "dont_know"
     group = classes.THAI_FINE_BY_PARENT[parent]
     return next((o for o in group if o.startswith("other_")), group[-1])
 
@@ -246,14 +275,47 @@ def cmd_detect(a):
         paths = [str(d / "frames" / f"{r['frame_id']}.jpg") for r in todo]
         sys.path.insert(0, str(HERE / "app"))
         from frames import best_device
-        for r, res in zip(todo, model.predict(source=paths, imgsz=a.imgsz, conf=a.conf,
-                                              stream=True, device=best_device(),
-                                              verbose=False)):
+        for r, res in zip(todo, predict_all(model, paths, imgsz=a.imgsz, conf=a.conf,
+                                            device=best_device(), verbose=False)):
             for b in res.boxes:
                 x1, y1, x2, y2 = (float(v) for v in b.xyxy[0])
                 body.append((r["frame_id"], round(x1, 1), round(y1, 1), round(x2, 1),
                              round(y2, 1), classes.THAI3_NAMES[int(b.cls)],
                              round(float(b.conf), 3)))
+    # M1 is class-agnostic, so boxes that came from `pick` are all labelled
+    # `sign`. The VLM's prompt is chosen BY parent -- Regulatory asks a 13-way
+    # question, Warning a 6-way one -- so without a parent there is no prompt at
+    # all. The three-class model knows parents, so run it over the same frames
+    # and adopt its verdict for whichever of its boxes agrees with ours.
+    orphan = sorted({r[0] for r in body if r[5] not in PARENTS})
+    if orphan:
+        from ultralytics import YOLO
+        sys.path.insert(0, str(HERE / "app"))
+        from frames import best_device
+        coarse_model = YOLO(a.model)
+        guide = collections.defaultdict(list)
+        for fid, res in zip(orphan, predict_all(
+                coarse_model, [str(d / "frames" / f"{fid}.jpg") for fid in orphan],
+                imgsz=a.imgsz, conf=a.conf, device=best_device(), verbose=False)):
+            for b in res.boxes:
+                guide[fid].append((tuple(float(v) for v in b.xyxy[0]),
+                                   classes.THAI3_NAMES[int(b.cls)]))
+        named = 0
+        fixed = []
+        for fid, x1, y1, x2, y2, coarse, conf in body:
+            if coarse not in PARENTS:
+                box = (float(x1), float(y1), float(x2), float(y2))
+                hit = max(guide.get(fid, []), key=lambda g: iou(box, g[0]), default=None)
+                # No agreement means M1 found a sign the coarse model did not.
+                # Leave it nameless on purpose: the VLM gets no say, and
+                # review.py puts it in front of a human instead of guessing.
+                coarse = hit[1] if hit and iou(box, hit[0]) >= 0.5 else ""
+                named += coarse in PARENTS
+            fixed.append((fid, x1, y1, x2, y2, coarse, conf))
+        body = fixed
+        print(f"  coarse class: {named}/{sum(1 for r in body if r[0] in set(orphan))} "
+              f"of M1's boxes matched by the three-class model")
+
     write_rows(d / "boxes.csv",
                ["frame_id", "x1", "y1", "x2", "y2", "coarse", "conf"], sorted(body))
     meta["detected"] = sorted(have | {r["frame_id"] for r in todo})
@@ -589,6 +651,10 @@ def cmd_status(_a):
 
 
 def selfcheck(_a=None):
+    assert chunked([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
+    assert chunked([], 2) == [] and chunked([1], 5) == [[1]]
+    assert sum(len(c) for c in chunked(list(range(350)))) == 350, "no frame dropped"
+
     assert iou((0, 0, 10, 10), (0, 0, 10, 10)) == 1.0
     assert iou((0, 0, 10, 10), (20, 20, 30, 30)) == 0.0
     # A reviewer nudging a box must still count as the same box, or the accept

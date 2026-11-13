@@ -128,6 +128,8 @@ def main():
         assert parse_answer("the answer is no_right_u_turn", "Regulatory") == "no_right_u_turn"
         assert parse_answer("keep_left_or_right", "Regulatory") == "keep_left_or_right"
         assert parse_answer("nonsense", "Warning") == "unparsed"
+        # M1's parent. Not a coarse class, so there is no prompt to build.
+        assert "sign" not in classes.THAI_FINE_BY_PARENT
         print("ok")
         return
 
@@ -161,6 +163,18 @@ def main():
     w = csv.writer(fh)
     if not done:
         w.writerow(["crop_id", "parent", "pred", "raw"])
+
+    # A crop whose parent is blank came from M1 -- class-agnostic, so nothing
+    # decided whether it is Regulatory, Warning or Information, and every prompt
+    # here is built per parent. Guessing the parent would mean guessing which
+    # 13 names to offer, so these are skipped and left for a human in review.py.
+    orphan = [c for c in todo if parent.get(c) not in classes.THAI_FINE_BY_PARENT]
+    if orphan:
+        print(f"  {len(orphan)} crops have no coarse class — left unnamed for review.py")
+        for c in orphan:
+            w.writerow([c, parent.get(c, ""), "", "no coarse class"])
+        fh.flush()
+        todo = [c for c in todo if c not in set(orphan)]
 
     for i, crop in enumerate(todo, 1):
         img = Image.open(a.crops / f"{crop}.jpg").convert("RGB")
