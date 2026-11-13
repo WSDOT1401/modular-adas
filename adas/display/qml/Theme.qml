@@ -23,6 +23,10 @@ QtObject {
     readonly property color signRed: "#E0261B"
     // A safety feature switched on and working (telltale green).
     readonly property color active: "#4FD08A"
+    // The settings menu's light: focus halo and ambient strip (MBUX-like cool
+    // cyan, kept clear of the alert colours), and the glass its items sit on.
+    readonly property color ambient: "#38CCF2"
+    readonly property color glass: "#121820"
 
     function levelColor(level) {
         switch (level) {

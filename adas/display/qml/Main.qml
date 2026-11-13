@@ -45,10 +45,14 @@ Window {
 
         SettingsMenu {
             id: menu
-            anchors.centerIn: parent
-            visible: win.menuOpen
+            anchors.fill: parent
+            open: win.menuOpen
+            laneOn: adas.laneEnabled
+            fcwOn: adas.fcwEnabled
+            signsOn: adas.signsEnabled
             roundShape: win.roundShape
             demoOn: demo.running
+            onToggleFeature: name => adas.toggleFeature(name)
             onToggleShape: settings.shape = win.roundShape ? "rect" : "round"
             onToggleDemo: demo.toggle()
             onCloseRequested: win.menuOpen = false
@@ -67,7 +71,8 @@ Window {
     // ---- driver input --------------------------------------------------------
     // The one place that decides what each control does. Today:
     //   hold   open / close settings
-    //   press  hide the current caution or info alert (in the menu: change)
+    //   press  hide the current caution or info alert (in the menu: change,
+    //          e.g. switch a safety feature on or off)
     //   turn   move through the menu (unused while driving, for now)
     function handleInput(name) {
         if (name === "long_press") {

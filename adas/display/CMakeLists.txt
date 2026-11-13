@@ -31,6 +31,7 @@ set(QML_SOURCES
     qml/SignIcon.qml
     qml/AlertIcon.qml
     qml/SettingsMenu.qml
+    qml/MenuIcon.qml
     qml/Scenarios.js
 )
 

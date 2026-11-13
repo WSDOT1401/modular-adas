@@ -17,6 +17,10 @@
 //   > lane drift (caution) > over the limit (caution) > new sign (info)
 // A press on the encoder acknowledges a caution or info alert: it stays
 // hidden until that alert clears. Warnings and system alerts cannot be hidden.
+//
+// The driver can switch each feature off from the menu. The choice is saved,
+// hides that feature's alerts here at once, and is sent to the vision service
+// (feature_enable, on the control port) so it stops running the stage.
 class AdasState : public QObject {
     Q_OBJECT
     Q_PROPERTY(double speed READ speed NOTIFY changed)
@@ -39,6 +43,10 @@ class AdasState : public QObject {
     Q_PROPERTY(QString reason READ reason NOTIFY changed)
     Q_PROPERTY(int udpPort READ udpPort CONSTANT)
     Q_PROPERTY(QString lastError READ lastError NOTIFY changed)
+    // The driver's choices from the menu (saved between runs).
+    Q_PROPERTY(bool laneEnabled READ laneEnabled NOTIFY changed)
+    Q_PROPERTY(bool fcwEnabled READ fcwEnabled NOTIFY changed)
+    Q_PROPERTY(bool signsEnabled READ signsEnabled NOTIFY changed)
 
 public:
     // How long data stays valid without a fresh datagram.
@@ -49,36 +57,49 @@ public:
     // km/h above the limit before "over the limit" shows.
     static constexpr double kOverspeedMargin = 2.0;
 
-    explicit AdasState(quint16 port, QObject* parent = nullptr);
+    // How often the driver's choices are re-sent, so a restarted vision
+    // service catches up.
+    static constexpr int kFeatureResendMs = 1000;
+
+    // controlPort 0: don't send the driver's choices anywhere.
+    explicit AdasState(quint16 port, quint16 controlPort = 9102, QObject* parent = nullptr);
 
     double speed() const { return m_speed; }
     bool hasSpeed() const { return m_hasSpeed; }
-    int speedLimit() const { return m_speedLimit; }
+    int speedLimit() const { return m_signsOn ? m_speedLimit : 0; }
     bool overspeed() const { return m_overspeed; }
-    bool laneWarning() const { return m_laneWarning && m_adasOnline; }
+    bool laneWarning() const { return m_laneWarning && m_adasOnline && m_laneOn; }
     QString laneDirection() const { return m_laneDirection; }
-    bool fcwWarning() const { return m_fcwWarning && m_adasOnline; }
+    bool fcwWarning() const { return m_fcwWarning && m_adasOnline && m_fcwOn; }
     double fcwTtc() const { return m_fcwTtc; }
-    bool leadVehicle() const { return m_leadVehicle && m_adasOnline; }
+    bool leadVehicle() const { return m_leadVehicle && m_adasOnline && m_fcwOn; }
     QString signSeen() const { return m_signSeen; }
     bool signFresh() const { return m_signFresh; }
-    QString moduleLane() const { return moduleState(m_moduleLane); }
-    QString moduleFcw() const { return moduleState(m_moduleFcw); }
-    QString moduleSigns() const { return moduleState(m_moduleSigns); }
+    QString moduleLane() const { return moduleState(m_moduleLane, m_laneOn); }
+    QString moduleFcw() const { return moduleState(m_moduleFcw, m_fcwOn); }
+    QString moduleSigns() const { return moduleState(m_moduleSigns, m_signsOn); }
     QString systemFault() const { return m_systemFault; }
     bool adasOnline() const { return m_adasOnline; }
     QString level() const { return m_level; }
     QString reason() const { return m_reason; }
     int udpPort() const { return m_port; }
     QString lastError() const { return m_lastError; }
+    bool laneEnabled() const { return m_laneOn; }
+    bool fcwEnabled() const { return m_fcwOn; }
+    bool signsEnabled() const { return m_signsOn; }
 
     // Feed one datagram's worth of JSON (used by the UDP socket, by demo mode
     // and by --scenario).
     Q_INVOKABLE void applyJsonString(const QString& json);
     // Hide the current caution/info alert until it clears.
     Q_INVOKABLE void acknowledge();
+    // Switch a feature on/off: "lane", "fcw" or "signs".
+    Q_INVOKABLE void toggleFeature(const QString& name);
 
     void applyJson(const QJsonObject& obj);
+    // Take only driver input ("input") from the network, no data: for
+    // --scenario, where the scenario supplies the data.
+    void setInputOnly(bool on) { m_inputOnly = on; }
 
 signals:
     void changed();
@@ -88,13 +109,18 @@ signals:
 private:
     void readPending();
     void recompute();
-    QString moduleState(const QString& raw) const;
+    QString moduleState(const QString& raw, bool enabled) const;
+    void sendFeatures();
 
     QUdpSocket m_socket;
+    QUdpSocket m_controlSocket;
+    QTimer m_controlTick;
+    quint16 m_controlPort;
     QTimer m_tick;
     QElapsedTimer m_clock;
     quint16 m_port;
     QString m_lastError;
+    bool m_inputOnly = false;
 
     double m_speed = 0.0;
     qint64 m_speedAt = -1;
@@ -111,6 +137,11 @@ private:
     QString m_moduleSigns;
     QString m_systemFault;
     qint64 m_adasAt = -1;
+
+    // The driver's choices.
+    bool m_laneOn = true;
+    bool m_fcwOn = true;
+    bool m_signsOn = true;
 
     // Derived in recompute().
     bool m_hasSpeed = false;
