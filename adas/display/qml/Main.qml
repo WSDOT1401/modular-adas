@@ -46,7 +46,7 @@ Window {
         SettingsMenu {
             id: menu
             anchors.fill: parent
-            visible: win.menuOpen
+            open: win.menuOpen
             laneOn: adas.laneEnabled
             fcwOn: adas.fcwEnabled
             signsOn: adas.signsEnabled
