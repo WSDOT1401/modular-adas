@@ -52,7 +52,7 @@ class Scheduler:
         port = config.CONTROL_PORT or DEFAULT_CONTROL_PORT
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.bind(("127.0.0.1", port))
+            sock.bind((config.CONTROL_BIND, port))
         except OSError as e:
             print(f"control port {port} unavailable ({e}): every feature stays on", file=sys.stderr)
             sock.close()
@@ -99,7 +99,8 @@ class Scheduler:
         else:
             print(f"speed reader not found at {config.SPEED_READER}: "
                   "speed limits will be announced without a number", file=sys.stderr)
-        tracker = SignTracker(config.SIGN_CONFIRM_FRAMES, config.SIGN_GAP_FRAMES)
+        tracker = SignTracker(config.SIGN_CONFIRM_FRAMES, config.SIGN_GAP_FRAMES,
+                              config.SIGN_REPEAT_S)
         return SignPipeline(detector, reader, vote, tracker)
 
     def _build_lane(self):

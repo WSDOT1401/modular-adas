@@ -54,9 +54,11 @@ SIGN_IMGSZ = 1280              # b01 was trained at 1280; at 640 small signs van
 SIGN_CONF = 0.5
 SIGN_DEVICE = None             # None = ultralytics picks; "cpu", "0" (CUDA), "mps" (Mac)
 # A sign counts after this many frames with it (gaps allowed), and rearms after
-# this many frames without it.
+# this many frames without it. The same class is not announced again within
+# SIGN_REPEAT_S seconds (a car waiting at a light keeps seeing the same sign).
 SIGN_CONFIRM_FRAMES = 3
 SIGN_GAP_FRAMES = 12
+SIGN_REPEAT_S = 20.0
 
 # --- Output (shared UDP contract) ------------------------------------------
 # None: adas_protocol's default, 127.0.0.1:9100, or ADAS_UDP_TARGETS if set.
@@ -65,3 +67,6 @@ UDP_PORT = None
 # Where the display's feature on/off choices arrive. None: adas_protocol's
 # DEFAULT_CONTROL_PORT (9102).
 CONTROL_PORT = None
+# Interface the control port listens on: this machine only, unless the
+# display is on another one (main.py --display sets "0.0.0.0").
+CONTROL_BIND = "127.0.0.1"

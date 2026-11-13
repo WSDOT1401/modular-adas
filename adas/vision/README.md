@@ -42,6 +42,7 @@ runtime/
   vehicle_state_cache.py latest speed/etc. to gate warnings             (TODO)
   health.py              FPS / drops / SoC temp watchdog                (TODO)
 tools/
+  bench.py               a clip as the camera: vision + speed sim + display, one command
   mock_lane_writer.py    synthetic warnings over UDP (works, no camera)
   calibrate.py           interactive ROI/warp calibration               (TODO)
   record_clip.py         record a clip into tests/fixtures/             (TODO)
@@ -79,7 +80,18 @@ real time), `--loop`, `--stages signs,lane`, `--weights`, `--reader`.
 
 ### Bench: a dashcam clip driving the display
 
-Three terminals, from the repo root:
+One command starts all three and stops them together (q in the preview, or
+Ctrl+C):
+
+```bash
+cd adas/vision
+python tools/bench.py --clip drive.mp4                          # display from adas/display/build
+python tools/bench.py --clip drive.mp4 --display path/to/adas_display --shape rect
+python tools/bench.py --clip drive.mp4 --display none           # display already running (Pi service)
+python tools/bench.py --clip drive.mp4 --speed fixed:45         # or cycle, none
+```
+
+Or by hand, three terminals from the repo root:
 
 ```bash
 adas/display/build/adas_display --windowed            # 1. the display (see adas/display)

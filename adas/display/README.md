@@ -49,7 +49,7 @@ shown. One alert at a time, highest first:
 | System | grey | camera blocked or not found | as above, plus a struck-through camera over the road and **CAMERA VIEW BLOCKED** | as above, plus the camera and **CAMERA VIEW BLOCKED** |
 | Caution | amber | drifting left/right | rim lights on that side, car slides toward the line | amber banner, car slides |
 | Caution | amber | over the limit (> limit + 2 km/h) | rim lights above the sign, speed turns amber, **OVERSPEED** | amber **OVERSPEED** banner |
-| Info | blue | sign just read (shown 8 s) | the sign appears ringed in blue (a new limit rings the limit sign) | blue banner, sign ringed in the strip |
+| Info | blue | sign just read (shown 8 s) | the sign appears ringed in blue, drawn as on the roadside: red octagon for stop, red ring and slash for a ban, blue disc for an instruction, yellow diamond for a warning (a new limit rings the limit sign) | blue banner, sign ringed in the strip |
 
 ### Safety features in use
 
@@ -195,6 +195,33 @@ systemctl --user enable --now adas-display adas-encoder
 
 They expect the repo at `~/modular-adas`.
 
+### Models on a laptop, display on the Pi
+
+For a Pi without an AI accelerator: the laptop runs the models (and a
+simulated speed), and sends everything over the network to the display on
+the Pi. Both on the same Wi-Fi or Ethernet.
+
+On the Pi, run the display listening on the network (it normally listens to
+the Pi itself only), naming the laptop so the menu's feature switches go back
+to it:
+
+```bash
+systemctl --user stop adas-display
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 \
+  ~/modular-adas/adas/display/build/adas_display --screen auto --vision-host <laptop-ip>
+```
+
+On the laptop:
+
+```bash
+cd adas/vision && python tools/bench.py --clip drive.mp4 --pi <pi-ip>
+```
+
+The first run on Windows asks to let Python through the firewall: allow it on
+private networks, or the menu's switches won't reach the laptop. Signs and
+speed still arrive either way. `systemctl --user start adas-display` puts the
+Pi back to normal.
+
 ### Next to the W124 cluster
 
 Each UDP port has one receiver, and the W124 cluster already listens on 9100.
@@ -210,8 +237,8 @@ it sends to 9101 as well, the display shows `--` for speed.
 
 ## Not done yet
 
-- The vision service doesn't send the collision, sign, module-status or fault
-  keys yet (those stages are stubs), so on the car the rim stays dashed and
-  every feature icon amber until it does. Use `tools/demo_sender.py` meanwhile.
+- The vision service sends signs, speed limits and module status (stage
+  `signs`, models in `adas/experiments/central/`), but not lane or collision
+  keys yet: those stages are stubs. Use `tools/demo_sender.py` for them.
 - No sound. Collision warnings in particular should chime.
 - Turning the encoder while driving does nothing yet.

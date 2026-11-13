@@ -135,3 +135,24 @@ def test_two_new_signs_in_one_frame_go_out_one_per_datagram():
     out = run(SignPipeline(det, tracker=SignTracker(2, 5)), 3)
     assert out[1] == {"sign_seen": "stop"}
     assert out[2] == {"sign_seen": "u_turn"}
+
+
+def test_tracker_holds_a_repeat_back_while_the_car_waits():
+    # Stopped at a light, a distant sign drops out of view and back again.
+    clock = [0.0]
+    t = SignTracker(confirm_frames=2, gap_frames=3, repeat_s=20, clock=lambda: clock[0])
+
+    def visit():
+        out = []
+        for _ in range(2):
+            clock[0] += 0.1
+            out += t.update(["pedestrian_crossing"])
+        for _ in range(4):
+            clock[0] += 0.1
+            t.update([])
+        return out
+
+    assert visit() == ["pedestrian_crossing"]
+    assert visit() == []                         # same sign, seconds later: quiet
+    clock[0] += 20
+    assert visit() == ["pedestrian_crossing"]    # a new one, well down the road

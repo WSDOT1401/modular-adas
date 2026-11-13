@@ -9,8 +9,11 @@
 #include <utility>
 #include <vector>
 
-AdasState::AdasState(quint16 port, quint16 controlPort, QObject* parent)
-    : QObject(parent), m_controlPort(controlPort), m_port(port) {
+AdasState::AdasState(quint16 port, quint16 controlPort, const QHostAddress& visionHost, QObject* parent)
+    : QObject(parent), m_controlPort(controlPort),
+      m_visionHost(visionHost.isNull() ? QHostAddress(QHostAddress::LocalHost) : visionHost),
+      m_port(port) {
+    const bool remote = !visionHost.isNull();
     m_clock.start();
 
     QSettings saved;
@@ -25,7 +28,7 @@ AdasState::AdasState(quint16 port, quint16 controlPort, QObject* parent)
     }
 
     if (m_port > 0) {
-        if (m_socket.bind(QHostAddress::LocalHost, m_port)) {
+        if (m_socket.bind(remote ? QHostAddress(QHostAddress::AnyIPv4) : QHostAddress(QHostAddress::LocalHost), m_port)) {
             connect(&m_socket, &QUdpSocket::readyRead, this, &AdasState::readPending);
         } else {
             m_lastError = QStringLiteral("Cannot listen on UDP port %1: %2")
@@ -155,7 +158,7 @@ void AdasState::sendFeatures() {
     QJsonObject msg;
     msg.insert(QStringLiteral("feature_enable"), features);
     m_controlSocket.writeDatagram(QJsonDocument(msg).toJson(QJsonDocument::Compact),
-                                  QHostAddress::LocalHost, m_controlPort);
+                                  m_visionHost, m_controlPort);
 }
 
 QString AdasState::moduleState(const QString& raw, bool enabled) const {

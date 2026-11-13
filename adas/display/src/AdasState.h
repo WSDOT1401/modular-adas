@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QElapsedTimer>
+#include <QHostAddress>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
@@ -62,7 +63,11 @@ public:
     static constexpr int kFeatureResendMs = 1000;
 
     // controlPort 0: don't send the driver's choices anywhere.
-    explicit AdasState(quint16 port, quint16 controlPort = 9102, QObject* parent = nullptr);
+    // visionHost: where the vision service runs. Null (the default) means on
+    // this machine: listen on localhost only. Set (bench: models on a laptop),
+    // listen on every interface and send the driver's choices to that host.
+    explicit AdasState(quint16 port, quint16 controlPort = 9102,
+                       const QHostAddress& visionHost = QHostAddress(), QObject* parent = nullptr);
 
     double speed() const { return m_speed; }
     bool hasSpeed() const { return m_hasSpeed; }
@@ -116,6 +121,7 @@ private:
     QUdpSocket m_controlSocket;
     QTimer m_controlTick;
     quint16 m_controlPort;
+    QHostAddress m_visionHost;
     QTimer m_tick;
     QElapsedTimer m_clock;
     quint16 m_port;

@@ -68,6 +68,9 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption controlPortOpt("control-port",
         "UDP port the vision service takes the driver's feature choices on (default 9102; 0 = don't send).",
         "port", "9102");
+    const QCommandLineOption visionHostOpt("vision-host",
+        "IP of the machine running the vision service, when it isn't this one (bench: models on a "
+        "laptop). Listens on the network instead of localhost only.", "ip");
     const QCommandLineOption shapeOpt("shape", "Screen shape: round or rect. Overrides the saved setting.", "shape");
     const QCommandLineOption windowedOpt("windowed", "Run in a window instead of full screen.");
     const QCommandLineOption scenarioOpt("scenario",
@@ -78,7 +81,7 @@ int main(int argc, char* argv[]) {
         "Monitor to run on: an output name from --list-screens (e.g. HDMI-A-2), a number, "
         "or auto (default: the square monitor when there are several).", "name", "auto");
     const QCommandLineOption listScreensOpt("list-screens", "Print the connected monitors and quit.");
-    cli.addOptions({portOpt, controlPortOpt, shapeOpt, windowedOpt, scenarioOpt, snapshotOpt, screenOpt, listScreensOpt});
+    cli.addOptions({portOpt, controlPortOpt, visionHostOpt, shapeOpt, windowedOpt, scenarioOpt, snapshotOpt, screenOpt, listScreensOpt});
     cli.process(app);
 
     const QList<QScreen*> screens = QGuiApplication::screens();
@@ -110,7 +113,12 @@ int main(int argc, char* argv[]) {
 
     const bool scripted = cli.isSet(scenarioOpt);
     const quint16 port = static_cast<quint16>(cli.value(portOpt).toUInt());
-    AdasState state(port, static_cast<quint16>(cli.value(controlPortOpt).toUInt()));
+    QHostAddress visionHost;
+    if (cli.isSet(visionHostOpt) && !visionHost.setAddress(cli.value(visionHostOpt))) {
+        qCritical("--vision-host wants an IP address, got %s", qPrintable(cli.value(visionHostOpt)));
+        return 2;
+    }
+    AdasState state(port, static_cast<quint16>(cli.value(controlPortOpt).toUInt()), visionHost);
     // A scripted scenario must not mix with a running producer's data, but the
     // driver's controls (the rotary encoder) still have to get through.
     state.setInputOnly(scripted);

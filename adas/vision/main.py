@@ -10,6 +10,9 @@ Usage:
     python main.py                                   # camera (Pi)
     python main.py --source file --clip drive.mp4    # replay a dashcam clip
     python main.py --source file --clip drive.mp4 --preview   # ...and show the boxes
+    python main.py --source file --clip drive.mp4 --display 192.168.1.50
+        # models here (a laptop), display on the Pi at that address; run the
+        # display there with --vision-host <this machine's IP>
 
 Bench without a camera or a model:
     python tools/mock_lane_writer.py    # synthetic lane warnings
@@ -35,6 +38,9 @@ def main() -> int:
                     help="file: process every frame instead of keeping real time")
     ap.add_argument("--loop", action="store_true", help="file: replay the clip forever")
     ap.add_argument("--preview", action="store_true", help="show frames with the detected boxes")
+    ap.add_argument("--display", metavar="HOST", default=None,
+                    help="send to a display on another machine (e.g. the Pi's IP), "
+                         "and take its feature switches from the network")
     args = ap.parse_args()
 
     config.SOURCE = args.source
@@ -52,6 +58,9 @@ def main() -> int:
         config.REPLAY_REALTIME = False
     if args.loop:
         config.REPLAY_LOOP = True
+    if args.display:
+        config.UDP_HOST = args.display
+        config.CONTROL_BIND = "0.0.0.0"
 
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
