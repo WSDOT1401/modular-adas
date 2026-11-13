@@ -47,6 +47,10 @@ import classes  # noqa: E402
 BATCHES = HERE / "batches"
 DATASET = HERE / "dataset"
 MODEL = HERE.parent / "results/thai_runs_20260917-0529/f100/thai3-1280/weights/best.pt"
+# M1 is class-agnostic -- it answers "is there a sign here", not "which sign".
+# That is exactly what the picker needs, and why `pick` defaults to it while
+# `detect` still defaults to the older three-class model.
+M1 = HERE.parent / "thai-traffic-sign-v3/m1/b01-best-m1.pt"
 
 # A reviewer needs a word for every verdict, including "there is a sign here but
 # I cannot name it". Deleting the box says something different -- it says "not a
@@ -187,6 +191,28 @@ def create(bid: str, picks, workspace: pathlib.Path) -> pathlib.Path:
     if missing:
         print(f"  !! {len(missing)} frames not in the cache, skipped: {missing[:3]}")
     return d
+
+
+def cmd_pick(a):
+    """Clips in, a batch out. Replaces splitting by seconds and choosing by eye."""
+    sys.path.insert(0, str(HERE / "app"))
+    import frames as F
+
+    ws = HERE / "app/workspace/frames"
+    picks = []
+    for v in a.clips:
+        if not v.exists():
+            sys.exit(f"{v} not found")
+        idx = F.pick(v, ws / v.stem, a.model, conf=a.conf,
+                     on_progress=lambda i, n, s=v.stem:
+                         (i % 50 == 0 or i == n) and
+                         print(f"\r  {s}  {i}/{n} frames", end="", flush=True))
+        picks += [(v.stem, f["id"], "sign") for f in idx["frames"]]
+        print(f"\r  {v.name}: kept {len(idx['frames'])} of {F.probe(v)['frames']} frames")
+    if not picks:
+        sys.exit("no frames picked — is the model finding anything at this conf?")
+    create(a.bid, picks, ws)
+    print(f"\nNext: prelabel.py detect {a.bid}")
 
 
 def cmd_new(a):
@@ -581,6 +607,15 @@ def selfcheck(_a=None):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("pick", help="clips -> a new batch, frames chosen by M1")
+    p.add_argument("bid")
+    p.add_argument("clips", nargs="+", type=pathlib.Path)
+    p.add_argument("--model", type=pathlib.Path, default=M1)
+    p.add_argument("--conf", type=float, default=0.15,
+                   help="deliberately below what ships: a detector cannot show "
+                        "you the signs it misses at its own operating point")
+    p.set_defaults(fn=cmd_pick)
 
     p = sub.add_parser("new", help="picked frames -> a new batch folder")
     p.add_argument("bid")
