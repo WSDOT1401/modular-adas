@@ -67,3 +67,8 @@ Sign to be recognize for M2:
 
 Total 452 boxes before any size floor.
 Class balance is the real problem: information is 70% of the pool.
+
+Arhway's footage:
+- first batch:
+  - start: 20220925122310_149820.MP4
+  - end: 20220925122310_149800.MP4

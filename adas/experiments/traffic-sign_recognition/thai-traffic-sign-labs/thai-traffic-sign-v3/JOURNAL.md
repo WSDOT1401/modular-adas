@@ -208,3 +208,113 @@ input" stops constraining anything. The pool only limits the **test** set now.
       listed the missing reject class as a known limit. Do it properly here.
 - [ ] Where the official Thai sign artwork comes from, and whether it matches
       what is actually on the road.
+
+---
+
+## 2026-11-13 — autolabel v2: M1 picks the frames
+
+The old pipeline's first step was a human scrolling a contact sheet choosing
+frames. It worked, but the frames it produced were full of the same sign three
+or four frames apart, because the only ruler available was time. M1 exists now,
+so it can do the choosing — and it has a ruler time never had.
+
+### Not a new pipeline
+
+The instinct was `autolabel-v2/` with three fresh scripts. Reading `prelabel.py`
+properly killed that: `detect`, `to-colab`/`from-colab`, `to-cvat`/`from-cvat` and
+`build` already work, already have a selfcheck, and `not_a_sign` was already a
+reviewer verdict. v2 is **two pieces bolted onto a pipeline that already runs**:
+
+- `app/frames.py: pick()` — replaces `extract()`'s sample-every-N-seconds. Writes
+  the same `frames.json` + `scores.json`, so `prelabel.py new` eats it unchanged.
+- `review.py` — step 4, naming crops, which genuinely did not exist.
+
+Nothing was reordered. `review.py` edits `predictions.csv` in place between
+`from-colab` and `to-cvat`, so CVAT receives labels a human already confirmed and
+the CVAT pass becomes purely "is this a box, is it tight?" — a far faster question
+than picking one of 25 names while squinting at a sign 30 px wide.
+
+### The rule, and the two versions of it that were wrong
+
+**Dedupe by size, not by time.** You drive past a sign over about three seconds,
+so a one-second interval still yields three near-identical pictures. What makes
+two frames worth reviewing separately is the sign being a different *size* —
+scale is the hardest axis for a detector and the one sampling by clock is blind
+to.
+
+**First try: three fixed size bands** (16/25/39 px at the network input). Wrong.
+A sign sitting near an edge flips bands on a one-pixel change and buys a second,
+identical frame. Measured on 700 frames: 40 picks, 7 of them adjacent.
+
+**Second try: a growth ratio.** A sign earns a frame once it is 1.5× bigger than
+when it was last kept. No edges, so nothing to jitter across. Same 700 frames:
+32 picks, 3 adjacent. Full clip: 131 → 118 frames, adjacent picks 15 → 4.
+
+**Then: edge-clipped crops.** Driving past a sign makes it bigger *and* pushes it
+out of frame, so "keep the biggest view" reaches for the last instant before the
+sign leaves — half of it already gone. `id1` went 33 → 53 → 75 → 92 → **100 px
+reading `ดรินทร์ / dra Road`**. M1 does not mind: a clipped sign is a normal
+thing for a detector to see. M2 does: half a `no_left_turn` is not a small
+`no_left_turn`, it is a red arc. `touches_edge()` now bars a cut box from earning
+a frame. 118 → 114 frames, and `id381`'s ladder went from a clipped 104 px top
+end to a clean 95 px.
+
+Each of the three was found by **looking at the pictures**, not at a metric. Same
+lesson as `speed_limit_classifier/`'s four bugs.
+
+### Confidence is deliberately low
+
+`conf=0.15`, not the 0.5 that ships. A detector only ever surfaces the signs it
+already finds, so at its operating point it can never show you its own misses —
+and the labels it produces quietly teach it to keep missing them. The growth rule
+is what makes that affordable: a lamppost tracked across 200 frames still only
+costs three frames. The junk it does surface is not waste either — a box the
+reviewer deletes is a *hard* negative, far better than a random crop of road, and
+that is M2's reject class built from work already being done.
+
+### Measured, on `sign_beep/test-clip-2.mp4` (1920×1080, 4609 frames, 2.5 min)
+
+| | |
+|---|---|
+| frames picked | 114 of 4609 |
+| adjacent picks (≤2 frames apart) | 4 of 113 |
+| boxes | 198 |
+| distinct tracks | 82 |
+| edge-clipped boxes still recorded | 2 (shown to the reviewer, never earn a frame) |
+
+Verified end to end: `pick` → `new` (198 boxes carried, **0** frames needing
+re-detection) → `detect` (198 crops) → `review.py` (scripted keystrokes: accept,
+`not_a_sign`, `dont_know`, and typing `sto`+ENTER resolving to `stop`). The Qwen
+hop is unchanged and untested here because it runs on Colab.
+
+### The 10× that was sitting there the whole time
+
+**ultralytics defaults to CPU on macOS even with MPS available.** `select_device()`
+returns `cpu`. Measured on the same clip: **1.8 frames/s → 17.9 frames/s**. A
+10-clip batch drops from ~2.8 hours to ~17 minutes. This was never about tracking
+— it had been costing every detector run in this pipeline. One `best_device()` now
+feeds `score()`, `pick()` and `prelabel.py detect`.
+
+### Numbers that mean something, and one that does not
+
+`scores.json` now records the **track id** per box. That is the only thing that
+says "these boxes are the same physical sign", and it replaces counting unique
+*clips* — the proxy the M2 entry had to lean on — with counting unique *signs*.
+When the new footage lands, re-count the M2 pool that way.
+
+Note that 82 tracks on one clip is a count of *candidates*, not signs. Two of the
+longest-lived are wing mirrors and one is a green road marking. The number only
+becomes real after the CVAT pass.
+
+### Open
+
+- [ ] **Edge-clipped boxes survive into the dataset.** Correct for M1, poison for
+      M2. Whatever script eventually cuts M2's training crops needs the same
+      `touches_edge()` check. Nothing enforces this yet.
+- [ ] `review.py` has never been driven by a human through its real cv2 window —
+      only by scripted keystrokes.
+- [ ] `GROWTH = 1.5` and `conf = 0.15` were chosen by argument, then sanity
+      checked on one clip. Worth revisiting once a reviewer has actually sat
+      through a batch and can say whether it felt redundant or thin.
+- [ ] The 720p question from earlier the same day: M1 is unaffected (it already
+      downsamples 2304 → 1280×720), M2 loses 1.8× of crop size. Film closer.

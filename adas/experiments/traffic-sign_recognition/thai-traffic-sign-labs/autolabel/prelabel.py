@@ -218,8 +218,11 @@ def cmd_detect(a):
         from ultralytics import YOLO
         model = YOLO(a.model)
         paths = [str(d / "frames" / f"{r['frame_id']}.jpg") for r in todo]
-        for r, res in zip(todo, model.predict(source=paths, imgsz=a.imgsz,
-                                              conf=a.conf, stream=True, verbose=False)):
+        sys.path.insert(0, str(HERE / "app"))
+        from frames import best_device
+        for r, res in zip(todo, model.predict(source=paths, imgsz=a.imgsz, conf=a.conf,
+                                              stream=True, device=best_device(),
+                                              verbose=False)):
             for b in res.boxes:
                 x1, y1, x2, y2 = (float(v) for v in b.xyxy[0])
                 body.append((r["frame_id"], round(x1, 1), round(y1, 1), round(x2, 1),
