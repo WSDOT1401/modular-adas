@@ -50,7 +50,12 @@ void AdasState::readPending() {
         if (err.error != QJsonParseError::NoError || !doc.isObject()) {
             continue;  // not ours or malformed: drop, like every consumer does
         }
-        applyJson(doc.object());
+        QJsonObject obj = doc.object();
+        if (m_inputOnly) {
+            if (!obj.contains(QLatin1String("input"))) continue;
+            obj = QJsonObject{{QStringLiteral("input"), obj.value(QLatin1String("input"))}};
+        }
+        applyJson(obj);
     }
 }
 

@@ -97,6 +97,9 @@ public:
     Q_INVOKABLE void toggleFeature(const QString& name);
 
     void applyJson(const QJsonObject& obj);
+    // Take only driver input ("input") from the network, no data: for
+    // --scenario, where the scenario supplies the data.
+    void setInputOnly(bool on) { m_inputOnly = on; }
 
 signals:
     void changed();
@@ -117,6 +120,7 @@ private:
     QElapsedTimer m_clock;
     quint16 m_port;
     QString m_lastError;
+    bool m_inputOnly = false;
 
     double m_speed = 0.0;
     qint64 m_speedAt = -1;

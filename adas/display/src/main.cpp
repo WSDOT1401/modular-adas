@@ -108,11 +108,12 @@ int main(int argc, char* argv[]) {
     f.setCapitalization(QFont::AllUppercase);
     QGuiApplication::setFont(f);
 
-    // A scripted scenario must not mix with a running producer, so it does not
-    // listen. A snapshot alone does: it shows whatever arrives over UDP.
-    const bool offline = cli.isSet(scenarioOpt);
-    const quint16 port = offline ? 0 : static_cast<quint16>(cli.value(portOpt).toUInt());
+    const bool scripted = cli.isSet(scenarioOpt);
+    const quint16 port = static_cast<quint16>(cli.value(portOpt).toUInt());
     AdasState state(port, static_cast<quint16>(cli.value(controlPortOpt).toUInt()));
+    // A scripted scenario must not mix with a running producer's data, but the
+    // driver's controls (the rotary encoder) still have to get through.
+    state.setInputOnly(scripted);
 
 #ifdef Q_OS_LINUX
     const bool fullScreen = !cli.isSet(windowedOpt) && !cli.isSet(snapshotOpt);
