@@ -55,14 +55,14 @@ shown. One alert at a time, highest first:
 
 Each feature can be switched on or off on its own, so the bottom of both
 layouts always shows the three of them, from `module_status`. The pictures
-follow what carmakers converge on for these telltales, and the colours follow
+are the ones drivers already know from production cars, and the colours follow
 the usual convention:
 
 | Icon ([`qml/FeatureIcon.qml`](qml/FeatureIcon.qml)) | Feature |
 |---|---|
-| our car from behind, between two lane lines | lane departure warning (`lane`) |
-| a car with an impact burst ahead of its nose | forward collision warning (`fcw`) |
-| a round sign and the camera reading it | traffic sign recognition (`signs`) |
+| a car from above, angled across a solid lane line, a dashed line on the other side | lane departure warning (`lane`) |
+| two cars in outline from the side, an impact star between them, an arrow for the gap closing | forward collision warning (`fcw`) |
+| a speed-limit sign | traffic sign recognition (`signs`) |
 
 | State | Looks |
 |---|---|
