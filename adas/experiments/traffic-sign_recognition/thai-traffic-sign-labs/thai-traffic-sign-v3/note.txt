@@ -1,0 +1,69 @@
+New Pipeline:
+
+                ╭────────╮                               ╭────────╮
+                │        │                               │        │
+                │   M1   │   ────────────────────────▶   │   M2   │
+                │        │                               │        │
+                ╰────────╯                               ╰────────╯
+                    ▲                                        ▲
+                    │                                        │
+                    │                                        │
+
+           Localization Model                        Recognition Model
+(Find where is traffic sign on the frame)      (Interpret What sign is that)
+
+M1 reads the DOWNSCALED frame (640 or 1280).
+M2 crops from the ORIGINAL frame (2304x1296) and never sees the downscale.
+Same sign = two different pixel sizes. Measure each model with its own ruler.
+
+   2304x1296 source
+          |
+          +------------------------+
+          | shrink to 640          | keep original
+          v                        v
+     640x360                  2304x1296
+     sign = 24 px             sign = 86 px
+          |                        |
+          v                        |
+        [ M1 ] -- box --> map back |
+                                   v
+                              crop 86x86
+                                   |
+                                   v
+                                 [ M2 ] -> "speed_limit"
+
+
+Do an experiments for what size should each model do:
+
+- M1  (floor = box short side at network input)
+  - Size @640, 1280: 10, 16, 24 px.
+  - Pool: 625 / 298 / 120 boxes (all 21 classes, measured @640).
+
+- M2  (NOT @640/1280 - M2 has no imgsz, it has a classifier input size)
+  - Resize every crop to a fixed input and find where accuracy falls off.
+  - Input size sweep: 24, 32, 48, 64 px.
+  - A box is usable if its SOURCE crop is already >= the target input.
+  - Pool (13 classes):
+      >= 24 src px : 376 boxes, 12/13 classes
+      >= 32 src px : 318 boxes, 11/13 classes
+      >= 48 src px : 200 boxes,  9/13 classes
+      >= 64 src px : 148 boxes,  8/13 classes
+
+
+Sign to be recognize for M2:
+- information          (317 boxes)
+- speed_limit          ( 57)
+- keep_left_or_right   ( 25)
+- left_curve           ( 15)
+- keep_left            ( 12)
+- no_right_u_turn      (  6)
+- turn_right           (  5)
+- right_curve          (  4)
+- turn_left            (  4)
+- no_left_turn         (  3)
+- stop                 (  2)
+- no_right_turn        (  2)
+- keep_right           (  0)  <-- ZERO labels in b01. Needs collecting or drop it.
+
+Total 452 boxes before any size floor.
+Class balance is the real problem: information is 70% of the pool.
