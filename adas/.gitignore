@@ -68,3 +68,11 @@ train_log_*.txt
 experiments/sign_beep/
 experiments/pi_recording/footage-test
 experiments/pi_recording/footage
+
+# --- experiments/central: the two models that ship ---
+# These are the deliverable, not a by-product -- `central/` is what gets copied
+# to the Pi, so it has to survive a plain `git clone`. 11 MB total, both files
+# far under GitHub's 100 MB per-file limit, so normal git carries them. NOT LFS:
+# a colleague without git-lfs would clone 130-byte pointer files that look like
+# weights and fail at load time, which is the exact problem this rule fixes.
+!experiments/central/*.pt
