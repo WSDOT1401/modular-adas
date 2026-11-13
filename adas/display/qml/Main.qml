@@ -45,7 +45,7 @@ Window {
 
         SettingsMenu {
             id: menu
-            anchors.centerIn: parent
+            anchors.fill: parent
             visible: win.menuOpen
             laneOn: adas.laneEnabled
             fcwOn: adas.fcwEnabled

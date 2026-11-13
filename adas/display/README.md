@@ -86,7 +86,10 @@ What each control does is decided in one place, `handleInput()` in
 
 ### The settings menu
 
-Hold the knob to open it. In order:
+Hold the knob to open it. It is a rotary carousel (MBUX-inspired): each
+detent turns the next item into focus, large on a glass disc inside a cyan
+halo, with its name and its control below; press changes it. The carousel
+wraps round. In order:
 
 | Item | Press does |
 |---|---|
