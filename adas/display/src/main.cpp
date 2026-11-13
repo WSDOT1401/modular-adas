@@ -65,6 +65,9 @@ int main(int argc, char* argv[]) {
     cli.setApplicationDescription(QStringLiteral("Modular ADAS display"));
     cli.addHelpOption();
     const QCommandLineOption portOpt("port", "UDP port to listen on (default 9100).", "port", "9100");
+    const QCommandLineOption controlPortOpt("control-port",
+        "UDP port the vision service takes the driver's feature choices on (default 9102; 0 = don't send).",
+        "port", "9102");
     const QCommandLineOption shapeOpt("shape", "Screen shape: round or rect. Overrides the saved setting.", "shape");
     const QCommandLineOption windowedOpt("windowed", "Run in a window instead of full screen.");
     const QCommandLineOption scenarioOpt("scenario",
@@ -75,7 +78,7 @@ int main(int argc, char* argv[]) {
         "Monitor to run on: an output name from --list-screens (e.g. HDMI-A-2), a number, "
         "or auto (default: the square monitor when there are several).", "name", "auto");
     const QCommandLineOption listScreensOpt("list-screens", "Print the connected monitors and quit.");
-    cli.addOptions({portOpt, shapeOpt, windowedOpt, scenarioOpt, snapshotOpt, screenOpt, listScreensOpt});
+    cli.addOptions({portOpt, controlPortOpt, shapeOpt, windowedOpt, scenarioOpt, snapshotOpt, screenOpt, listScreensOpt});
     cli.process(app);
 
     const QList<QScreen*> screens = QGuiApplication::screens();
@@ -109,7 +112,7 @@ int main(int argc, char* argv[]) {
     // listen. A snapshot alone does: it shows whatever arrives over UDP.
     const bool offline = cli.isSet(scenarioOpt);
     const quint16 port = offline ? 0 : static_cast<quint16>(cli.value(portOpt).toUInt());
-    AdasState state(port);
+    AdasState state(port, static_cast<quint16>(cli.value(controlPortOpt).toUInt()));
 
 #ifdef Q_OS_LINUX
     const bool fullScreen = !cli.isSet(windowedOpt) && !cli.isSet(snapshotOpt);

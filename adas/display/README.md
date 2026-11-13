@@ -84,20 +84,45 @@ What each control does is decided in one place, `handleInput()` in
 | press | `Enter` / `Space` | hide the current caution or info alert until it clears (warnings can't be hidden) | change the highlighted item |
 | turn | arrow keys | nothing yet | move the highlight |
 
-Settings: screen shape (round / 4:3) and demo scenarios. They are saved
-between runs.
+### The settings menu
 
-### Wiring the encoder (KY-040 style)
+Hold the knob to open it. In order:
 
-| Encoder | Pi (BCM) |
+| Item | Press does |
 |---|---|
-| CLK / A | GPIO 5 |
-| DT / B | GPIO 6 |
-| SW | GPIO 13 |
-| + / GND | 3V3 / GND |
+| Lane departure | switch the feature on / off |
+| Forward collision | switch the feature on / off |
+| Sign recognition | switch the feature on / off |
+| Screen shape | round / 4:3 |
+| Demo scenarios | play the built-in scenarios / stop |
+| Close | close the menu (holding the knob does too) |
 
-GPIO 17 is used by the W124 speed sensor. Other pins: `--a`, `--b`, `--button`;
-wrong direction: `--reverse`.
+Everything is saved between runs. A feature switched off:
+
+- stops at once on the display: none of its alerts show, its icon at the
+  bottom is struck through, and with sign recognition off the limit sign goes
+  blank (so OVERSPEED can't fire on a limit the system isn't reading);
+- stops in the vision service: the display sends the choices
+  (`feature_enable`) to udp 9102 on every change and once a second, and the
+  service skips that stage, which also saves the Pi's processor.
+  `--control-port N` moves it; `--control-port 0` sends nothing.
+
+### Wiring the encoder
+
+Any 5-pin rotary encoder with a push button. Two kinds are common:
+
+| On a small board (KY-040): `CLK DT SW + GND` | Bare (EC11): 3 pins one side, 2 the other | Pi (BCM, physical pin) |
+|---|---|---|
+| CLK | 3-pin side, left (A) | GPIO 5 (pin 29) |
+| DT | 3-pin side, right (B) | GPIO 6 (pin 31) |
+| SW | 2-pin side, one leg | GPIO 13 (pin 33) |
+| + | (none) | 3V3 (pin 1), never 5 V |
+| GND | 3-pin side middle, and the other 2-pin leg | GND (e.g. pin 30 or 34) |
+
+The script turns on the Pi's internal pull-ups, so a bare encoder needs no
+resistors or power wire. GPIO 17 is used by the W124 speed sensor. Other pins:
+`--a`, `--b`, `--button`; turning goes the wrong way: `--reverse` (or swap A
+and B).
 
 ## Build and run on the Pi
 

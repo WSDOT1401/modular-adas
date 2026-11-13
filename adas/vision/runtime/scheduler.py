@@ -12,15 +12,22 @@ datagram with:
 Stages come from ``config.STAGES``. Signs run today; lane is wired but its
 CV stages are still TODO. Forward collision is not built yet, so its icon
 reads "off".
+
+The driver switches features on and off from the display's menu; the display
+sends ``feature_enable`` to the control port (udp 9102). A switched-off stage
+is skipped entirely (no inference, so no CPU spent) and reported as "off".
+Until the first message arrives, everything built is on.
 """
 from __future__ import annotations
 
+import json
+import socket
 import sys
 import time
 from pathlib import Path
 from typing import Optional
 
-from adas_protocol import MODULE_STATUS, SYSTEM_FAULT
+from adas_protocol import DEFAULT_CONTROL_PORT, FEATURE_ENABLE, MODULE_STATUS, SYSTEM_FAULT
 
 import config
 from capture.base import FrameSource
@@ -37,6 +44,42 @@ class Scheduler:
         self._preview = preview
         self._signs = self._build_signs() if "signs" in config.STAGES else None
         self._lane = self._build_lane() if "lane" in config.STAGES else None
+        self._enabled = {"lane": True, "fcw": True, "signs": True}   # the driver's choices
+        self._control = self._open_control()
+
+    # ---- the driver's choices (display -> here) ----------------------------------
+    def _open_control(self) -> Optional[socket.socket]:
+        port = config.CONTROL_PORT or DEFAULT_CONTROL_PORT
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError as e:
+            print(f"control port {port} unavailable ({e}): every feature stays on", file=sys.stderr)
+            sock.close()
+            return None
+        sock.setblocking(False)
+        return sock
+
+    def _read_control(self) -> None:
+        while self._control is not None:
+            try:
+                data = self._control.recv(4096)
+            except (BlockingIOError, OSError):
+                return
+            try:
+                choice = json.loads(data).get(FEATURE_ENABLE)
+            except (ValueError, AttributeError):
+                continue
+            if not isinstance(choice, dict):
+                continue
+            for name in self._enabled:
+                if name in choice and bool(choice[name]) != self._enabled[name]:
+                    self._enabled[name] = bool(choice[name])
+                    print(f"[{self._source.time:7.1f} s] driver switched {name} "
+                          f"{'on' if self._enabled[name] else 'off'}", flush=True)
+
+    def _running(self, name: str, stage) -> bool:
+        return stage is not None and self._enabled[name]
 
     # ---- stages ---------------------------------------------------------------
     def _build_signs(self):
@@ -73,9 +116,9 @@ class Scheduler:
     def _status(self) -> dict:
         return {
             MODULE_STATUS: {
-                "lane": "on" if self._lane else "off",
-                "fcw": "off",
-                "signs": "on" if self._signs else "off",
+                "lane": "on" if self._running("lane", self._lane) else "off",
+                "fcw": "off",                              # not built yet
+                "signs": "on" if self._running("signs", self._signs) else "off",
             },
             SYSTEM_FAULT: "",
         }
@@ -86,13 +129,14 @@ class Scheduler:
         started = time.monotonic()
         try:
             for frame in self._source.frames():
+                self._read_control()
                 payload = self._status()
                 detections = []
-                if self._signs is not None:
+                if self._running("signs", self._signs):
                     events, detections = self._signs.update(frame)
                     payload.update(events)
                     self._log(events)
-                if self._lane is not None:
+                if self._running("lane", self._lane):
                     payload.update(self._lane(frame))
                 self._publisher.send(payload)
                 frames += 1
@@ -104,6 +148,8 @@ class Scheduler:
                   f"{self._source.dropped} dropped to keep up", file=sys.stderr)
             self._source.close()
             self._publisher.close()
+            if self._control is not None:
+                self._control.close()
             if self._preview:
                 import cv2  # type: ignore
                 cv2.destroyAllWindows()

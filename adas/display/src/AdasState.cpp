@@ -4,13 +4,25 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QNetworkDatagram>
+#include <QSettings>
 
 #include <utility>
 #include <vector>
 
-AdasState::AdasState(quint16 port, QObject* parent)
-    : QObject(parent), m_port(port) {
+AdasState::AdasState(quint16 port, quint16 controlPort, QObject* parent)
+    : QObject(parent), m_controlPort(controlPort), m_port(port) {
     m_clock.start();
+
+    QSettings saved;
+    m_laneOn = saved.value(QStringLiteral("features/lane"), true).toBool();
+    m_fcwOn = saved.value(QStringLiteral("features/fcw"), true).toBool();
+    m_signsOn = saved.value(QStringLiteral("features/signs"), true).toBool();
+    if (m_controlPort > 0) {
+        m_controlTick.setInterval(kFeatureResendMs);
+        connect(&m_controlTick, &QTimer::timeout, this, &AdasState::sendFeatures);
+        m_controlTick.start();
+        sendFeatures();
+    }
 
     if (m_port > 0) {
         if (m_socket.bind(QHostAddress::LocalHost, m_port)) {
@@ -118,7 +130,34 @@ void AdasState::applyJson(const QJsonObject& obj) {
     }
 }
 
-QString AdasState::moduleState(const QString& raw) const {
+void AdasState::toggleFeature(const QString& name) {
+    bool* flag = name == QLatin1String("lane")  ? &m_laneOn
+               : name == QLatin1String("fcw")   ? &m_fcwOn
+               : name == QLatin1String("signs") ? &m_signsOn
+                                                : nullptr;
+    if (!flag) return;
+    *flag = !*flag;
+    QSettings().setValue(QStringLiteral("features/") + name, *flag);
+    if (m_controlPort > 0) sendFeatures();
+    recompute();
+}
+
+void AdasState::sendFeatures() {
+    QJsonObject features;
+    features.insert(QStringLiteral("lane"), m_laneOn);
+    features.insert(QStringLiteral("fcw"), m_fcwOn);
+    features.insert(QStringLiteral("signs"), m_signsOn);
+    QJsonObject msg;
+    msg.insert(QStringLiteral("feature_enable"), features);
+    m_controlSocket.writeDatagram(QJsonDocument(msg).toJson(QJsonDocument::Compact),
+                                  QHostAddress::LocalHost, m_controlPort);
+}
+
+QString AdasState::moduleState(const QString& raw, bool enabled) const {
+    // Switched off by the driver: off, whatever the ADAS says.
+    if (!enabled) {
+        return QStringLiteral("off");
+    }
     // No data: whatever the driver chose, nothing works right now.
     if (!m_adasOnline) {
         return QStringLiteral("paused");
@@ -141,18 +180,19 @@ void AdasState::recompute() {
 
     m_adasOnline = m_adasAt >= 0 && now - m_adasAt < kAdasStaleMs;
     m_hasSpeed = m_speedAt >= 0 && now - m_speedAt < kSpeedStaleMs;
-    m_signFresh = !m_signSeen.isEmpty() && m_signAt >= 0 && now - m_signAt < kSignShowMs;
-    m_overspeed = m_hasSpeed && m_speedLimit > 0 && m_speed > m_speedLimit + kOverspeedMargin;
+    // A feature the driver switched off shows nothing, alerts included.
+    m_signFresh = m_signsOn && !m_signSeen.isEmpty() && m_signAt >= 0 && now - m_signAt < kSignShowMs;
+    m_overspeed = m_hasSpeed && speedLimit() > 0 && m_speed > speedLimit() + kOverspeedMargin;
 
     // Every alert that is true right now, highest priority first.
     std::vector<std::pair<QString, QString>> active;  // (level, reason)
-    if (m_adasOnline && m_fcwWarning)
+    if (fcwWarning())
         active.emplace_back(QStringLiteral("warning"), QStringLiteral("fcw"));
     if (!m_adasOnline)
         active.emplace_back(QStringLiteral("system"), QStringLiteral("adas_offline"));
     if (m_adasOnline && !m_systemFault.isEmpty())
         active.emplace_back(QStringLiteral("system"), QStringLiteral("fault"));
-    if (m_adasOnline && m_laneWarning)
+    if (laneWarning())
         active.emplace_back(QStringLiteral("caution"),
                             m_laneDirection == QLatin1String("right")
                                 ? QStringLiteral("lane_right")

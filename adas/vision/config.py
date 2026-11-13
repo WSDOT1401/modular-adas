@@ -62,3 +62,6 @@ SIGN_GAP_FRAMES = 12
 # None: adas_protocol's default, 127.0.0.1:9100, or ADAS_UDP_TARGETS if set.
 UDP_HOST = None
 UDP_PORT = None
+# Where the display's feature on/off choices arrive. None: adas_protocol's
+# DEFAULT_CONTROL_PORT (9102).
+CONTROL_PORT = None

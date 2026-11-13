@@ -55,6 +55,12 @@ ADAS_KEYS = frozenset({
 INPUT = "input"                      # one of INPUT_EVENTS
 INPUT_EVENTS = ("rotate_cw", "rotate_ccw", "press", "long_press")
 
-CONTROL_KEYS = frozenset({INPUT})
+# --- Driver choices (adas/display -> the ADAS) ----------------------------
+# Which features the driver has switched on, from the display's menu. Sent the
+# other way, display -> vision service, on the control channel
+# (DEFAULT_CONTROL_PORT), on every change and once a second.
+FEATURE_ENABLE = "feature_enable"    # {"lane"|"fcw"|"signs": bool}
+
+CONTROL_KEYS = frozenset({INPUT, FEATURE_ENABLE})
 
 ALL_KEYS = VEHICLE_KEYS | ADAS_KEYS | CONTROL_KEYS

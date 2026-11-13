@@ -112,4 +112,8 @@ until those stages run) and `system_fault`: the display's heartbeat. On top:
 | signs | `sign_seen: "<class>"` once per sign; for a speed limit `sign_seen: "speed_limit"` at once, then `speed_limit: 60` when the reader's vote settles |
 | lane | `lane_warning`, `lane_direction`, `lane_confidence` |
 
+It also listens on udp 9102 for the driver's menu choices (`feature_enable`
+from the display): a switched-off stage is skipped, not just hidden, and
+reported as `"off"`. Until the first message, everything built is on.
+
 See [`adas/protocol/README.md`](../protocol/README.md).

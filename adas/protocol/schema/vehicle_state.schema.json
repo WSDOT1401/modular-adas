@@ -36,6 +36,16 @@
     },
     "system_fault": { "type": "string", "description": "ADAS: empty = none, else a fault id such as camera_blocked" },
 
-    "input": { "type": "string", "enum": ["rotate_cw", "rotate_ccw", "press", "long_press"], "description": "Driver control event (rotary encoder, buttons); one datagram per event" }
+    "input": { "type": "string", "enum": ["rotate_cw", "rotate_ccw", "press", "long_press"], "description": "Driver control event (rotary encoder, buttons); one datagram per event" },
+    "feature_enable": {
+      "type": "object",
+      "description": "Driver's on/off choice per feature, from the display's menu; sent display -> ADAS on the control channel (udp 9102)",
+      "properties": {
+        "lane":  { "type": "boolean" },
+        "fcw":   { "type": "boolean" },
+        "signs": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
   }
 }

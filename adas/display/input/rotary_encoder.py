@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rotary encoder with push button -> ADAS display control events.
 
-Reads a KY-040-style encoder on the Pi's GPIO and sends one UDP datagram per
+Reads a 5-pin encoder (KY-040 board or bare EC11) on the Pi's GPIO and sends one UDP datagram per
 event ({"input": "rotate_cw" | "rotate_ccw" | "press" | "long_press"}), so the
 display never touches hardware and the same events can come from a keyboard,
 a steering-wheel button or a test script.
@@ -12,7 +12,8 @@ adas/display/qml/Main.qml.
 Wiring (BCM numbers; change with the flags):
     CLK / A  -> GPIO 5      DT / B -> GPIO 6      SW -> GPIO 13
     +        -> 3V3         GND    -> GND
-GPIO 17 is taken by the W124 speed sensor; I2C (GPIO 2/3) is left free for an
+A bare encoder has no + pin: its middle pin and the button's other leg go to
+GND (the pins use the Pi's internal pull-ups). GPIO 17 is taken by the W124 speed sensor; I2C (GPIO 2/3) is left free for an
 IMU such as an MPU-6050.
 
     python3 adas/display/input/rotary_encoder.py
