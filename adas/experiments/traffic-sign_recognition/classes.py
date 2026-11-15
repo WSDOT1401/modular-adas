@@ -92,6 +92,9 @@ THAI_FINE_BY_PARENT: dict[str, tuple[str, ...]] = {
         "keep_left_or_right",
         "turn_left",
         "turn_right",
+        # The blue REGULATORY sign showing a white bus: this lane or road is
+        # reserved for them. NOT the bus-stop board at the kerb, which is
+        # roadside furniture and gets its box deleted -- see `information`.
         "reserved_for_bus",
         # Split out of other_regulatory on 2026-11-15, same reasoning as
         # `chevron`: each was a visually unmistakable block inside the bucket,
@@ -143,6 +146,25 @@ THAI_FINE_BY_PARENT: dict[str, tuple[str, ...]] = {
         # Catch-all, and deliberately the only other entry: Thai information
         # signs are mostly text and direction boards with no fixed iconography,
         # so there is nothing stable to enumerate. Keep it last.
+        #
+        # THE RULE, written down 2026-11-16 because not having it was costing
+        # real labels. `information` is a GUIDE SIGN ERECTED BY THE ROAD
+        # AUTHORITY: place names, distances, direction arrows, lane diagrams,
+        # facility boards. Anything else rectangular with text on it is NOT a
+        # sign and its box is deleted -- shop fronts, billboards, posters, and
+        # bus-stop boards at the kerb.
+        #
+        # An appearance test cannot settle this, which is why one was not
+        # enough: a billboard really is "a large board with text", and the
+        # classifier calls one `information` at 0.94 for exactly that reason.
+        # The test is who put it there and whether it helps you drive.
+        #
+        # It matters because `information` is one of the 13 the dash SHOWS.
+        # Label a bus shelter `information` and the screen speaks at every bus
+        # stop -- not a quiet error, a driver-visible one. Of M2's `not_a_sign`
+        # mistakes, 10 went to `information` and 9 to `reserved_for_bus`: over
+        # half of them landed on this one boundary, because the labels said
+        # both answers. See JOURNAL 2026-11-16.
         "information",
     ),
 }
