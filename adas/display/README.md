@@ -170,8 +170,9 @@ installing on the Pi. To change it, replace the `.ttf`/`.otf` files in
 
 The display goes full screen on one monitor only and hides the mouse pointer
 there. By default (`--screen auto`) it picks the square monitor when several
-are connected: a round panel reports itself as square, e.g. 720 × 720. To pin
-it to a monitor by name:
+are connected (a round panel reports itself as square, e.g. 720 × 720), else,
+with two, the one that isn't primary: a round panel without EDID comes up as
+1024 × 768. To pin it to a monitor by name:
 
 ```bash
 ./build/adas_display --list-screens             # 0  HDMI-A-1  1600x900  (primary)
@@ -179,8 +180,9 @@ it to a monitor by name:
 ./build/adas_display --screen HDMI-A-2
 ```
 
-If the round monitor doesn't show up as 720 × 720, set its mode in the Screen
-Configuration tool (or `wlr-randr --output HDMI-A-2 --mode 720x720`) first.
+Run it through X11 (`QT_QPA_PLATFORM=xcb DISPLAY=:0`, as the service does).
+On Wayland the desktop (labwc) decides which monitor a full-screen window
+lands on, and with two monitors it isn't always the one asked for.
 
 ### Start at boot
 
@@ -207,7 +209,7 @@ to it:
 
 ```bash
 systemctl --user stop adas-display
-QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 \
+QT_QPA_PLATFORM=xcb DISPLAY=:0 \
   ~/modular-adas/adas/display/build/adas_display --screen auto --vision-host <laptop-ip>
 ```
 

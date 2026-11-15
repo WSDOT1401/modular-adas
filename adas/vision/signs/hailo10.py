@@ -17,12 +17,12 @@ the one-to-many head: ltrb distances, sigmoid scores, NMS per class).
 
 btop can't see the HAT, and on the Hailo-10H HailoRT 5.1.1's own
 ``hailortcli monitor`` shows nothing (not supported there yet). So once a
-second this writes the chip's fps, load, latency and temperature to
-:data:`STATS_FILE`; ``tools/hat_monitor.py`` shows them live.
+second this works out the chip's fps, load, latency and temperature into
+:attr:`HailoSignDetector.stats`; the scheduler passes them on to the stats
+screen (tools/stats_window.py).
 """
 from __future__ import annotations
 
-import json
 import os
 import time
 from collections import deque
@@ -36,7 +36,6 @@ _PAD = 114          # ultralytics' letterbox grey
 _IOU = 0.7          # ultralytics' NMS default
 _MAX_DET = 300
 
-STATS_FILE = Path("/dev/shm/adas-hat.json")
 # Most the chip does with b01.hef and this many frames in flight (measured on
 # the AI HAT+ 2): the "100%" of the load figure.
 _MAX_FPS = {1: 18.0, 2: 35.0, 3: 51.0, 4: 59.0}
@@ -86,6 +85,7 @@ class HailoSignDetector:
         self._anchors, self._strides = self._make_anchors(shapes)
         self._chips = self._device.get_physical_devices()   # kept: the control dies with it
         self._stats_t, self._stats_n, self._stats_lat = time.monotonic(), 0, 0.0
+        self.stats: dict = {}             # the latest figures, once a second
 
     def _make_anchors(self, shapes: dict) -> Tuple[np.ndarray, np.ndarray]:
         points, strides = [], []
@@ -141,7 +141,7 @@ class HailoSignDetector:
         job.wait(_TIMEOUT_MS)
         self._stats_n += 1
         self._stats_lat += (done_at[0] if done_at else time.monotonic()) - sent
-        self._write_stats()
+        self._update_stats()
         logits = np.concatenate([bindings.output(n).get_buffer().reshape(-1, len(self.names))
                                  for n in self._cls_names])
         dist = np.concatenate([bindings.output(n).get_buffer().reshape(-1, 4)
@@ -174,8 +174,8 @@ class HailoSignDetector:
                         "score": float(score[i])})
         return out
 
-    # ---- stats for tools/hat_monitor.py -------------------------------------------
-    def _write_stats(self) -> None:
+    # ---- stats for the stats screen -------------------------------------------------
+    def _update_stats(self) -> None:
         now = time.monotonic()
         span = now - self._stats_t
         if span < 1.0:
@@ -187,27 +187,17 @@ class HailoSignDetector:
             temp = round(max(t.ts0_temperature, t.ts1_temperature), 1)
         except Exception:            # noqa: BLE001 - a missed reading isn't worth a crash
             temp = None
-        stats = {
-            "time": time.time(), "pid": os.getpid(), "model": self._hef_name,
+        self.stats = {
+            "model": self._hef_name,
             "fps": round(fps, 1), "max_fps": cap,
             "load": round(min(fps / cap, 1.0), 3) if cap else None,
             "latency_ms": round(self._stats_lat / self._stats_n * 1000, 1) if self._stats_n else None,
             "in_flight": len(self._inflight), "depth": self._depth, "temp_c": temp,
         }
         self._stats_t, self._stats_n, self._stats_lat = now, 0, 0.0
-        try:
-            tmp = STATS_FILE.with_suffix(".tmp")
-            tmp.write_text(json.dumps(stats))
-            os.replace(tmp, STATS_FILE)
-        except OSError:
-            pass
 
     def close(self) -> None:
         while self._inflight:
             self._inflight.popleft()[0].wait(_TIMEOUT_MS)
         self._configured.__exit__(None, None, None)
         self._device.release()
-        try:
-            STATS_FILE.unlink()
-        except OSError:
-            pass

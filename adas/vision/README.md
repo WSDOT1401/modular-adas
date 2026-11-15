@@ -45,7 +45,7 @@ runtime/
   health.py              FPS / drops / SoC temp watchdog                (TODO)
 tools/
   bench.py               a clip as the camera: vision + speed sim + display, one command
-  hat_monitor.py         live AI HAT load / fps / latency / temperature (btop can't see it)
+  stats_window.py        AI HAT and Pi load on a monitor of its own (btop can't see the HAT)
   export_hailo.py        compile b01 for the AI HAT (in WSL / Linux x86_64)
   mock_lane_writer.py    synthetic warnings over UDP (works, no camera)
   calibrate.py           interactive ROI/warp calibration               (TODO)
@@ -129,11 +129,15 @@ Full resolution has twice the pixels across each sign for the speed reader;
 binned sees each sign in twice as many frames. b01 on the Pi's CPU alone:
 0.9 fps.
 
-btop doesn't show the HAT. While the vision service runs, in another
-terminal on the Pi:
+btop doesn't show the HAT. The vision service writes its load figures
+(AI HAT load, fps, time per frame and chip temperature; Pi CPU per core,
+memory and SoC temperature) to `/dev/shm/adas-stats.json` once a second, and
+`tools/stats_window.py` shows them, with two minutes of history, full screen
+on the other monitor. They never go to the driver's display.
 
 ```bash
-python3 tools/hat_monitor.py
+DISPLAY=:0 python3 tools/stats_window.py     # full screen on HDMI-A-1
+python3 tools/stats_window.py --text          # in a terminal, e.g. over ssh
 ```
 
 ## Test

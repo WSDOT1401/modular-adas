@@ -35,6 +35,10 @@ class SignPipeline:
         self._tracker = tracker or SignTracker()
         self._pending: deque = deque()
 
+    @property
+    def detector(self):
+        return self._detector
+
     def update(self, frame) -> "Tuple[dict, List[dict]]":
         """Process one frame. Returns ``(keys to publish, detections)``; the
         detections are for drawing a preview.

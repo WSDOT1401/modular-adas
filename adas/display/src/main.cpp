@@ -35,8 +35,9 @@ static QString loadBundledFont() {
 
 // Which monitor to use. `spec` is an output name as --list-screens prints it
 // (e.g. HDMI-A-2), a screen number, or "auto": with more than one monitor,
-// the first square one (a round panel reports itself as square), else the
-// primary. Returns an index into QGuiApplication::screens(), or -1.
+// the first square one (a round panel reports itself as square), else with
+// two the one that isn't primary, else the primary. Returns an index into
+// QGuiApplication::screens(), or -1.
 static int pickScreen(const QString& spec) {
     const QList<QScreen*> screens = QGuiApplication::screens();
     if (spec != QLatin1String("auto")) {
@@ -52,6 +53,10 @@ static int pickScreen(const QString& spec) {
             const QSize s = screens[i]->size();
             if (s.width() == s.height()) return i;
         }
+        // A round panel that doesn't identify itself (no EDID) comes up as
+        // 1024x768: with two monitors, the ADAS one is the one that isn't primary.
+        if (screens.size() == 2)
+            return screens[0] == QGuiApplication::primaryScreen() ? 1 : 0;
     }
     return screens.indexOf(QGuiApplication::primaryScreen());
 }

@@ -9,6 +9,11 @@ datagram with:
   - whatever the enabled stages decided (``sign_seen``, ``speed_limit``,
     ``lane_*``).
 
+Once a second it also writes its load figures (frame rate, Pi CPU, memory and
+temperature, the AI HAT's load and temperature) to ``runtime.health.STATS_FILE``
+for ``tools/stats_window.py``, a stats screen of its own: they stay off the
+driver's display.
+
 Stages come from ``config.STAGES``. Signs run today; lane is wired but its
 CV stages are still TODO. Forward collision is not built yet, so its icon
 reads "off".
@@ -31,6 +36,7 @@ from adas_protocol import DEFAULT_CONTROL_PORT, FEATURE_ENABLE, MODULE_STATUS, S
 
 import config
 from capture.base import FrameSource
+from runtime.health import HealthMonitor, clear_stats, write_stats
 from runtime.publisher import UdpPublisher
 
 
@@ -46,6 +52,9 @@ class Scheduler:
         self._lane = self._build_lane() if "lane" in config.STAGES else None
         self._enabled = {"lane": True, "fcw": True, "signs": True}   # the driver's choices
         self._control = self._open_control()
+        self._health = HealthMonitor()
+        self._stats_at = time.monotonic()
+        self._stats_frames = 0
 
     # ---- the driver's choices (display -> here) ----------------------------------
     def _open_control(self) -> Optional[socket.socket]:
@@ -133,6 +142,23 @@ class Scheduler:
             SYSTEM_FAULT: "",
         }
 
+    def _write_stats(self, frames: int) -> None:
+        """Once a second: the load figures, for tools/stats_window.py."""
+        now = time.monotonic()
+        if now - self._stats_at < 1.0:
+            return
+        stats = {"fps": round((frames - self._stats_frames) / (now - self._stats_at), 1),
+                 "dropped": self._source.dropped, "source": config.SOURCE}
+        self._stats_at, self._stats_frames = now, frames
+        stats.update(self._health.snapshot().as_dict())
+        # Switched off, the signs stage doesn't run, and the HAT's last figures go stale.
+        on = self._running("signs", self._signs)
+        hat = getattr(self._signs.detector, "stats", None) if on else None
+        for key in ("load", "fps", "temp_c", "latency_ms", "max_fps"):
+            if hat and hat.get(key) is not None:
+                stats["hat_" + key] = hat[key]
+        write_stats(stats)
+
     # ---- loop -----------------------------------------------------------------
     def run(self) -> None:
         frames = 0
@@ -150,6 +176,7 @@ class Scheduler:
                     payload.update(self._lane(frame))
                 self._publisher.send(payload)
                 frames += 1
+                self._write_stats(frames)
                 if self._preview and not self._show(frame, detections):
                     break
         finally:
@@ -157,6 +184,7 @@ class Scheduler:
             print(f"{frames} frames in {elapsed:.0f} s ({frames / elapsed:.1f} fps), "
                   f"{self._source.dropped} dropped to keep up", file=sys.stderr)
             self._source.close()
+            clear_stats()
             if self._signs is not None:
                 self._signs.close()
             self._publisher.close()

@@ -13,13 +13,19 @@ Window {
     readonly property real designH: 720
     property bool menuOpen: false
 
-    // The monitor chosen by --screen (main.cpp). Set before the window is shown,
-    // so full screen lands on that monitor.
-    screen: Qt.application.screens[startupScreen]
+    // The monitor chosen by --screen (main.cpp). The desktop (labwc) makes a
+    // window full screen on whichever monitor it first appears on, whatever
+    // `screen` says, so the window opens inside that monitor first and goes
+    // full screen once it's there. Placing it needs X11 (QT_QPA_PLATFORM=xcb):
+    // a Wayland client can't choose where its window goes.
+    readonly property var startScreen: Qt.application.screens[startupScreen]
+    screen: startScreen
+    x: startScreen.virtualX + Math.max(0, (startScreen.width - width) / 2)
+    y: startScreen.virtualY + Math.max(0, (startScreen.height - height) / 2)
     width: designW
     height: designH
     visible: true
-    visibility: startFullScreen ? Window.FullScreen : Window.Windowed
+    visibility: Window.Windowed
     color: "#000000"
     title: "ADAS display"
 
@@ -121,6 +127,12 @@ Window {
     }
 
     // ---- start-up --------------------------------------------------------------
+    Timer {
+        running: startFullScreen
+        interval: 300
+        onTriggered: win.visibility = Window.FullScreen
+    }
+
     Component.onCompleted: {
         if (startupShape !== "") settings.shape = startupShape
         if (startupScenario === "cycle") demo.toggle()
