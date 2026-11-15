@@ -149,6 +149,22 @@ THAI_FINE_BY_PARENT: dict[str, tuple[str, ...]] = {
 
 THAI_FINE_NAMES = [n for group in THAI_FINE_BY_PARENT.values() for n in group]
 
+# The 13 M2 actually SHOWS on the dash. The other 15 are helper classes: a right
+# answer the driver never sees. Training on a name per sign family rather than
+# one "other" bucket is Background Splitting (Mullapudi et al., CVPR 2021) --
+# a catch-all is the hardest kind of class to learn, and we already had the
+# labels. See JOURNAL 2026-11-15.
+#
+# This list is also what the scoreboard averages over, so it is what M2's
+# train/val split is built to cover: a class with no val crops is a blank cell
+# in the presentation, which is the one thing a split can control.
+THAI_FINE_DISPLAYED: tuple[str, ...] = (
+    "stop", "no_left_turn", "no_right_turn", "no_right_u_turn", "speed_limit",
+    "keep_left", "keep_right", "keep_left_or_right", "turn_left", "turn_right",
+    "left_curve", "right_curve", "information",
+)
+assert set(THAI_FINE_DISPLAYED) <= set(THAI_FINE_NAMES)
+
 # fine class name -> its thai3 parent, for the VLM prompt and for collapsing a
 # fine prediction back to the coarse label.
 THAI_FINE_PARENT: dict[str, str] = {

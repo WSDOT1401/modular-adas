@@ -43,6 +43,10 @@ def review(d, only=None, todo=False) -> None:
     pred = {r["crop_id"]: r["pred"] for r in P.rows(d / "predictions.csv")}
     done = {r["crop_id"] for r in P.rows(d / "confirmed.csv")}
     smap = P.rows(P.need(d, "source_map.csv", "detect"))
+    extra = fill_crops(d, smap)        # the boxes CVAT added, which have no crop yet
+    if extra:
+        print(f"cut {len(extra)} crop(s) for boxes added by hand in CVAT")
+    smap += extra
 
     # After a CVAT pass, reviewed.csv is the truth -- it holds the boxes a human
     # fixed and the names chosen there. Filter and display from it, or --only
@@ -164,6 +168,51 @@ def reviewed_rows(d, smap):
     return rev, at
 
 
+def fill_crops(d, smap) -> list:
+    """Crops for the boxes a human DREW in CVAT. Returns the extra smap rows.
+
+    `prelabel.py detect` cuts one crop per box the detector proposed, and that
+    is the whole of crops/. A box drawn by hand in CVAT afterwards gets a row in
+    reviewed.csv and no crop on disk, so review.py could never show it -- 51 of
+    b02-1's 547 boxes, and two of those were wrong. They are cut here on demand,
+    the same way detect cuts its own, rather than by re-running detect, which
+    would throw away every name on the batch.
+    """
+    import cv2
+
+    rev, at = reviewed_rows(d, smap)
+    if not rev:
+        return []
+    matched = set(at.values())
+    crops = d / "crops"
+    extra, per_frame = [], collections.Counter()
+    for i, r in enumerate(rev):
+        if i in matched:
+            continue
+        fid = r["frame_id"]
+        cid = f"{fid}_c{per_frame[fid]}"
+        per_frame[fid] += 1
+        extra.append({"crop_id": cid, "frame_id": fid, "coarse": "",
+                      **{k: r[k] for k in ("x1", "y1", "x2", "y2")}})
+        out, frame = crops / f"{cid}.jpg", d / "frames" / f"{fid}.jpg"
+        if out.exists() or not frame.exists():
+            continue
+        img = cv2.imread(str(frame))
+        if img is None:
+            continue
+        H, W = img.shape[:2]
+        patch = img[max(0, int(float(r["y1"]))):min(H, int(float(r["y2"]))),
+                    max(0, int(float(r["x1"]))):min(W, int(float(r["x2"])))]
+        if patch.size == 0:
+            continue
+        if max(patch.shape[:2]) < P.CROP_PX:          # same upscale detect uses
+            s = P.CROP_PX / max(patch.shape[:2])
+            patch = cv2.resize(patch, None, fx=s, fy=s, interpolation=cv2.INTER_LANCZOS4)
+        crops.mkdir(exist_ok=True)
+        cv2.imwrite(str(out), patch)
+    return extra
+
+
 def sync_reviewed(d, smap, pred) -> int:
     """Carry renames into reviewed.csv, which is what `prelabel.py build` reads.
 
@@ -232,6 +281,9 @@ def selfcheck() -> None:
         assert n == 1, n
         assert got == ["chevron", "information", "other_warning"], got
         assert refused == {"c1": "not_a_sign"}, refused
+        # ...and that a reviewed box with no crop is noticed. No frames/ here,
+        # so nothing is cut -- the queue drops rows whose crop is missing.
+        assert [r["crop_id"] for r in fill_crops(d, smap[:2])] == ["f2_c0"]
     print("ok")
 
 
