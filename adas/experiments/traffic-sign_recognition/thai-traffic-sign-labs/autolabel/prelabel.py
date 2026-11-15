@@ -460,13 +460,21 @@ def cmd_to_cvat(a):
     shutil.make_archive(str(out.with_suffix("")), "zip", stage)
     shutil.rmtree(stage)
 
+    # CVAT will not create labels for you: an unregistered name fails the whole
+    # import. Hand the reviewer a file they can paste into Labels -> Raw.
+    labels = d / "cvat_labels.json"
+    labels.write_text(json.dumps(
+        [{"name": n, "type": "rectangle", "attributes": []} for n in NAMES],
+        indent=2) + "\n")
+
     n_box = sum(len(v) for v in by_frame.values())
     n_empty = len(listed) - len(by_frame)
     print(f"{out}: {len(listed)} frames, {n_box} boxes ({out.stat().st_size/1e6:.1f} MB)")
     print(f"  {n_pred} boxes pre-named by Qwen, {n_box-n_pred} fell back to a catch-all")
     print(f"  {n_empty} frames are empty — the reviewer confirms that, which is "
           f"where a missed sign gets caught")
-    print(f"\nIn CVAT: create a task with these {len(NAMES)} labels in obj.names order,\n"
+    print(f"\nIn CVAT: paste {labels} into the project's Labels -> Raw tab\n"
+          f"(all {len(NAMES)} names must exist before import or it rejects the lot),\n"
           f"upload the zip as the data, then Actions -> Upload annotations -> "
           f"'YOLO 1.1' -> the same zip.\nWhen your group is done: Export task dataset "
           f"-> 'YOLO 1.1' (untick Save images), then\n  prelabel.py from-cvat {a.bid} "

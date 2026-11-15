@@ -72,3 +72,5 @@ Arhway's footage:
 - first batch:
   - start: 20220925122310_149820.MP4
   - end: 20220925122310_149800.MP4
+
+Currently autolabelv2 isn't efficient for knowledge distill. need to have created a new prompt for qwen.
