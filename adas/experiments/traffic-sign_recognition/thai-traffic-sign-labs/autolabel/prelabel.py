@@ -5,6 +5,7 @@
     prelabel.py detect     b01
     prelabel.py to-colab   b01
     prelabel.py from-colab b01 ~/Downloads/predictions.csv
+    prelabel.py from-m2    b01
     prelabel.py to-cvat    b01
     prelabel.py from-cvat  b01 ~/Downloads/task_export.zip
     prelabel.py build
@@ -65,6 +66,17 @@ VAL_FRAC = 0.20
 
 
 # ----------------------------------------------------------------- plumbing --
+
+def readable(r, floor: int) -> bool:
+    """Is this source_map box big enough for M2 to be asked about it?
+
+    Short side in SOURCE pixels, the same gate build_m2.py applies when it cuts
+    training crops. Measuring one thing at train time and another at inference
+    is the quietest way to lose a score you already paid for.
+    """
+    return min(float(r["x2"]) - float(r["x1"]),
+               float(r["y2"]) - float(r["y1"])) >= floor
+
 
 def iou(a, b) -> float:
     ax1, ay1, ax2, ay2 = a
@@ -352,7 +364,7 @@ def cmd_detect(a):
           f"({len(todo)} frames newly detected, {len(man)-len(todo)} already had boxes)")
     print(f"  {len(smap)} crops -> {crops}")
     print(f"  {empty} frames have no box at all (background for training)")
-    print(f"\nNext: prelabel.py to-colab {a.bid}")
+    print(f"\nNext: prelabel.py from-m2 {a.bid}   (or to-colab, for classes M2 has never seen)")
 
 
 # ------------------------------------------------------------------- colab --
@@ -405,6 +417,95 @@ def cmd_from_colab(a):
     if unknown:
         print(f"  {unknown} labels are not class names; they fall back to the "
               f"coarse catch-all in the CVAT task")
+    print(f"\nNext: prelabel.py to-cvat {a.bid}")
+
+
+# ---------------------------------------------------------------------- m2 --
+
+def cmd_from_m2(a):
+    """Name every crop with M2 instead of Qwen.
+
+    On b02-1's label mix Qwen2.5-VL gets 42-58% of these boxes wrong, and the
+    reason is the mix, not the prompt: its best class (`information`, 99%) is
+    54% of the golden set and 16% of this footage, while its worst
+    (`no_stopping_parking`, 17%) is 26% of it. M2 scores 99% on that class and
+    88.5% over all 932 val crops. Once a class has training crops the small
+    classifier is simply the better labeller, and it runs here in seconds
+    instead of a Colab round trip.
+
+    Qwen still earns its keep for a class M2 has never seen -- `keep_right` has
+    zero crops anywhere -- because a classifier cannot name what it was never
+    trained on. That is the only distillation left to do.
+
+    Crop geometry must match training exactly or none of that transfers:
+    squared around the box centre by build_m2.square, nothing below READABLE px
+    on the short side. Boxes under the floor are left blank for a human, the
+    same way qwen_label.py leaves the crops it has no coarse class for.
+    """
+    d = find(a.bid)
+    smap = rows(need(d, "source_map.csv", "detect"))
+    # predictions.csv is where review.py keeps the human's answers too, so
+    # re-running this over a reviewed batch would quietly delete the labelling.
+    if (d / "confirmed.csv").exists() and not a.force:
+        sys.exit(f"{d.name} has been reviewed by a human — "
+                 f"predictions.csv holds their labels.\n"
+                 f"  --force to overwrite them with the model's guesses")
+    sys.path.insert(0, str(HERE.parent / "thai-traffic-sign-v3"))
+    import torch
+    from PIL import Image
+
+    import build_m2
+    import train_m2 as T
+    from demo_e2e import load_m2   # one loader, so the checkpoint contract
+                                   # cannot drift between here and the demo
+
+    dev = ("cuda" if torch.cuda.is_available() else
+           "mps" if torch.backends.mps.is_available() else "cpu")
+    model, names = load_m2(dev)
+    print(f"M2 on {dev}: {len(smap)} crops")
+
+    by_frame = collections.defaultdict(list)
+    for r in smap:
+        by_frame[r["frame_id"]].append(r)
+
+    out, small, missing = [], 0, 0
+    for fid, rs in sorted(by_frame.items()):
+        f = d / "frames" / f"{fid}.jpg"
+        if not f.exists():
+            missing += len(rs)
+            continue
+        im = Image.open(f).convert("RGB")
+        keep, batch = [], []
+        for r in rs:
+            if not readable(r, build_m2.READABLE):
+                out.append((r["crop_id"], "", ""))
+                small += 1
+                continue
+            keep.append(r["crop_id"])
+            batch.append(T.NORM(build_m2.square(
+                im, *(float(r[k]) for k in ("x1", "y1", "x2", "y2")))))
+        if not batch:
+            continue
+        with torch.no_grad():
+            p = torch.softmax(model(torch.stack(batch).to(dev)), 1)
+        conf, idx = p.max(1)
+        out += [(c, names[i], f"{v:.3f}")
+                for c, i, v in zip(keep, idx.tolist(), conf.tolist())]
+
+    # conf rides along so review.py can put the model's own doubts first; it is
+    # dropped on the first save, which is correct -- after a human looks, the
+    # number is about a guess nobody needs any more.
+    write_rows(d / "predictions.csv", ["crop_id", "pred", "conf"], sorted(out))
+    named = collections.Counter(pred for _c, pred, _v in out if pred)
+    unsure = sum(1 for _c, pred, v in out if pred and float(v) < a.unsure)
+    print(f"{d/'predictions.csv'}: {sum(named.values())}/{len(smap)} crops named")
+    if small:
+        print(f"  {small} under {build_m2.READABLE}px short side — left blank for a human")
+    if missing:
+        print(f"  {missing} crops have no frame on disk")
+    print(f"  {unsure} named below {a.unsure:.2f} confidence — review these first")
+    for n, c in named.most_common(8):
+        print(f"    {c:5d}  {n}")
     print(f"\nNext: prelabel.py to-cvat {a.bid}")
 
 
@@ -675,6 +776,9 @@ def selfcheck(_a=None):
     assert NAMES[:len(classes.THAI_FINE_NAMES)] == list(classes.THAI_FINE_NAMES), \
         "fine classes must keep their index order or every exported box shifts class"
     assert "not_a_sign" in SPECIAL
+    # M2 is asked only about boxes big enough to have been training crops.
+    assert readable({"x1": "0", "y1": "0", "x2": "30", "y2": "24"}, 24)
+    assert not readable({"x1": "0", "y1": "0", "x2": "30", "y2": "23.9"}, 24)
     print("ok")
 
 
@@ -714,6 +818,14 @@ def main():
     p.add_argument("bid")
     p.add_argument("csv", type=pathlib.Path)
     p.set_defaults(fn=cmd_from_colab)
+
+    p = sub.add_parser("from-m2", help="name the crops with M2 (no Colab)")
+    p.add_argument("bid")
+    p.add_argument("--unsure", type=float, default=0.80,
+                   help="confidence below which a crop is worth a human's time first")
+    p.add_argument("--force", action="store_true",
+                   help="overwrite a batch a human has already reviewed")
+    p.set_defaults(fn=cmd_from_m2)
 
     p = sub.add_parser("to-cvat", help="-> review.zip, for your group")
     p.add_argument("bid")
