@@ -16,6 +16,8 @@ vision/tests/fixtures/*
 # Raw weights and media are never committed (models/manifests/ records their
 # metadata); benchmark CSVs under experiments/ are tracked.
 *.pt
+# b01 compiled for the AI HAT (vision/tools/export_hailo.py)
+*_hailo_model/
 *.jpg
 *.mp4
 runs/

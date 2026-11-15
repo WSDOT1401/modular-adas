@@ -59,7 +59,9 @@ SPEED_READER = str(_ADAS / "experiments/central/speed_reader.pt")
 # classify.py, which loads speed_reader.pt; on the Pi, copy it next to the .pt files.
 SPEED_READER_CODE = str(_ADAS / "experiments/traffic-sign_recognition/speed_limit_classifier")
 SIGN_IMGSZ = 1280              # b01 was trained at 1280; at 640 small signs vanish
-SIGN_CONF = 0.5
+# INT8 on the Hailo scores signs a little lower than b01.pt does (the 30 km/h
+# sign at 0:31 of the bench clip: 0.46-0.63 vs the .pt's higher scores).
+SIGN_CONF = 0.4 if SIGN_WEIGHTS.endswith("_hailo_model") else 0.5
 SIGN_DEVICE = None             # None = ultralytics picks; "cpu", "0" (CUDA), "mps" (Mac)
 # A sign counts after this many frames with it (gaps allowed), and rearms after
 # this many frames without it. The same class is not announced again within

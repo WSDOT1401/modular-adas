@@ -87,7 +87,7 @@ class Scheduler:
         from signs.pipeline import SignPipeline
         from signs.tracker import SignTracker
 
-        if not Path(config.SIGN_WEIGHTS).is_file():
+        if not Path(config.SIGN_WEIGHTS).exists():      # a .pt, or a Hailo model folder
             sys.exit(f"sign detector weights not found: {config.SIGN_WEIGHTS}\n"
                      "copy b01.pt there (see adas/experiments/central/README.md) or pass --weights")
         detector = SignDetector(config.SIGN_WEIGHTS, config.SIGN_IMGSZ, config.SIGN_CONF,

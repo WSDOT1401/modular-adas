@@ -7,6 +7,7 @@ what you copy to the Pi.
 |---|---|---|---|
 | `b01.pt` | finds signs in a frame and names the class (21 Thai classes) | 5.6 MB | `089efd7043d6` |
 | `speed_reader.pt` | reads the number off a `speed_limit` crop | 6.3 MB | `e7fd7d1c5d73` |
+| `b01_hailo_model/` | b01 compiled for the Pi's AI HAT+ 2 (`b01.hef` + `metadata.yaml`), made by `vision/tools/export_hailo.py`; the vision service uses it instead of `b01.pt` when the HAT's software is installed. On the bench clip: 7–8 fps on the Pi, against 0.9 fps for `b01.pt` on the Pi's processor | 4.5 MB | |
 
 They run as **two stages**, not one model: the detector works on a frame
 downsampled to 1280px, where a distant sign's digits are a few pixels tall and
