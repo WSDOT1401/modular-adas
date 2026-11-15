@@ -37,8 +37,19 @@ class SignPipeline:
 
     def update(self, frame) -> "Tuple[dict, List[dict]]":
         """Process one frame. Returns ``(keys to publish, detections)``; the
-        detections are for drawing a preview."""
-        detections = [d for d in self._detector.detect(frame) if publishable(d["name"])]
+        detections are for drawing a preview.
+
+        A pipelined detector (the AI HAT's: ``push``) answers for a frame it
+        was given a few calls ago and hands that frame back; the speed reader
+        crops it, not the current one. While it fills up, nothing comes out."""
+        if hasattr(self._detector, "push"):
+            done = self._detector.push(frame)
+            if done is None:
+                return {}, []
+            frame, raw = done
+        else:
+            raw = self._detector.detect(frame)
+        detections = [d for d in raw if publishable(d["name"])]
         out: dict = {}
 
         for name in self._tracker.update(d["name"] for d in detections):
@@ -59,3 +70,10 @@ class SignPipeline:
         if SIGN_SEEN not in out and self._pending:
             out[SIGN_SEEN] = self._pending.popleft()
         return out, detections
+
+    def close(self) -> None:
+        """Release the detector's device (the AI HAT: left to the garbage
+        collector, HailoRT can hang the exit)."""
+        close = getattr(self._detector, "close", None)
+        if close is not None:
+            close()

@@ -90,11 +90,17 @@ class Scheduler:
         if not Path(config.SIGN_WEIGHTS).exists():      # a .pt, or a Hailo model folder
             sys.exit(f"sign detector weights not found: {config.SIGN_WEIGHTS}\n"
                      "copy b01.pt there (see adas/experiments/central/README.md) or pass --weights")
-        detector = SignDetector(config.SIGN_WEIGHTS, config.SIGN_IMGSZ, config.SIGN_CONF,
-                                config.SIGN_DEVICE)
-        print(f"signs: {config.SIGN_WEIGHTS} on "
-              f"{'the Hailo AI HAT' if detector.on_hailo else (config.SIGN_DEVICE or 'auto (CPU/GPU)')}",
-              file=sys.stderr)
+        if Path(config.SIGN_WEIGHTS).is_dir():          # compiled for the AI HAT
+            from signs.hailo10 import HailoSignDetector
+
+            detector = HailoSignDetector(config.SIGN_WEIGHTS, config.SIGN_CONF,
+                                         config.SIGN_HAILO_DEPTH)
+            where = "the Hailo AI HAT"
+        else:
+            detector = SignDetector(config.SIGN_WEIGHTS, config.SIGN_IMGSZ, config.SIGN_CONF,
+                                    config.SIGN_DEVICE)
+            where = config.SIGN_DEVICE or "auto (CPU/GPU)"
+        print(f"signs: {config.SIGN_WEIGHTS} on {where}", file=sys.stderr)
         reader = vote = None
         if Path(config.SPEED_READER).is_file():
             from signs.speed import load_reader
@@ -151,6 +157,8 @@ class Scheduler:
             print(f"{frames} frames in {elapsed:.0f} s ({frames / elapsed:.1f} fps), "
                   f"{self._source.dropped} dropped to keep up", file=sys.stderr)
             self._source.close()
+            if self._signs is not None:
+                self._signs.close()
             self._publisher.close()
             if self._control is not None:
                 self._control.close()

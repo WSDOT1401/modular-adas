@@ -130,6 +130,33 @@ def test_reader_gets_the_nearest_speed_limit_box():
     assert seen == [70]
 
 
+def test_pipelined_detector_reads_the_frame_its_detections_came_from():
+    # The AI HAT's detector answers `lag` frames late and hands that frame back.
+    class LaggedDetector:
+        def __init__(self, lag):
+            self.lag, self.queue = lag, []
+
+        def push(self, frame):
+            self.queue.append(frame)
+            if len(self.queue) <= self.lag:
+                return None
+            old = self.queue.pop(0)
+            return old, [box("speed_limit")]
+
+    read = []
+
+    class Reader:
+        def __call__(self, frame, b):
+            read.append(frame)
+            return 40, 0.9
+
+    pipe = SignPipeline(LaggedDetector(2), Reader(), CountVote(need=2), SignTracker(2, 5))
+    out = [pipe.update(f"frame{i}")[0] for i in range(5)]
+    assert out[:2] == [{}, {}]                     # filling up
+    assert read == ["frame0", "frame1", "frame2"]
+    assert out[3] == {"speed_limit": 40, "sign_seen": "speed_limit"}
+
+
 def test_two_new_signs_in_one_frame_go_out_one_per_datagram():
     det = ScriptedDetector([[box("stop"), box("u_turn")]] * 2)
     out = run(SignPipeline(det, tracker=SignTracker(2, 5)), 3)

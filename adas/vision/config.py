@@ -63,6 +63,9 @@ SIGN_IMGSZ = 1280              # b01 was trained at 1280; at 640 small signs van
 # sign at 0:31 of the bench clip: 0.46-0.63 vs the .pt's higher scores).
 SIGN_CONF = 0.4 if SIGN_WEIGHTS.endswith("_hailo_model") else 0.5
 SIGN_DEVICE = None             # None = ultralytics picks; "cpu", "0" (CUDA), "mps" (Mac)
+# Frames in flight on the AI HAT: 1 = 18 fps, 2 = 35, 3+ = ~60 (the chip's
+# limit). Detections arrive this many frames late (100 ms at 30 fps).
+SIGN_HAILO_DEPTH = 3
 # A sign counts after this many frames with it (gaps allowed), and rearms after
 # this many frames without it. The same class is not announced again within
 # SIGN_REPEAT_S seconds (a car waiting at a light keeps seeing the same sign).
