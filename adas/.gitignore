@@ -76,6 +76,3 @@ experiments/pi_recording/footage
 # a colleague without git-lfs would clone 130-byte pointer files that look like
 # weights and fail at load time, which is the exact problem this rule fixes.
 !experiments/central/*.pt
-
-# sheet.py output: contact sheets regenerate from the m2/ crops
-experiments/traffic-sign_recognition/thai-traffic-sign-labs/thai-traffic-sign-v3/sheet/
