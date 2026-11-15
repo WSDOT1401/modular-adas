@@ -79,6 +79,8 @@ def main() -> int:
     ap.add_argument("--target", default="hailo10h", choices=("hailo10h", "hailo8", "hailo8l"))
     ap.add_argument("--imgsz", type=int, default=1280, help="b01 was trained at 1280")
     ap.add_argument("--frames", type=int, default=1024, help="calibration frames")
+    ap.add_argument("--out", default=str(CENTRAL / "b01_hailo_model"),
+                    help="where the compiled model folder goes")
     ap.add_argument("--work", default=str(Path.home() / "hailo-calib"),
                     help="where the calibration frames go (reused on a rerun)")
     args = ap.parse_args()
@@ -90,8 +92,14 @@ def main() -> int:
     out = model.export(format="hailo", name=args.target, imgsz=args.imgsz, data=str(yaml))
 
     # Ultralytics writes <weights>_hailo_model/ next to the weights; say where.
-    out = Path(out)
-    dest = CENTRAL / "b01_hailo_model"
+    # A failed compile can still leave the folder behind, and the vision
+    # service would then pick it up instead of b01.pt: insist on the .hef.
+    out = Path(out) if out else None
+    if out is None or not any(out.glob("*.hef")):
+        if out is not None:
+            shutil.rmtree(out, ignore_errors=True)
+        sys.exit("export failed: no .hef produced (see the log above)")
+    dest = Path(args.out)
     if out.resolve() != dest.resolve():
         shutil.rmtree(dest, ignore_errors=True)
         shutil.move(str(out), dest)

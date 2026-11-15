@@ -6,6 +6,7 @@ the repo root; these are sane defaults for bench work.
 """
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 _ADAS = Path(__file__).resolve().parent.parent      # adas/
@@ -48,9 +49,12 @@ CLEAR_FRAMES = 5
 # The .pt files are gitignored: copy them in by hand (see that folder's README).
 # On a Pi with an AI HAT, b01 runs on the Hailo chip: tools/export_hailo.py
 # compiles it into central/b01_hailo_model/, used whenever that folder is
-# there. Without it, b01.pt runs on the CPU.
+# there and the Hailo runtime is installed (the AI HAT is fitted). Otherwise
+# b01.pt runs on the CPU, so a PC with a copy of the folder still works.
 _HAILO_SIGNS = _ADAS / "experiments/central/b01_hailo_model"
-SIGN_WEIGHTS = str(_HAILO_SIGNS if _HAILO_SIGNS.is_dir() else _ADAS / "experiments/central/b01.pt")
+_HAS_HAILO = importlib.util.find_spec("hailo_platform") is not None
+SIGN_WEIGHTS = str(_HAILO_SIGNS if _HAILO_SIGNS.is_dir() and _HAS_HAILO
+                   else _ADAS / "experiments/central/b01.pt")
 SPEED_READER = str(_ADAS / "experiments/central/speed_reader.pt")
 # classify.py, which loads speed_reader.pt; on the Pi, copy it next to the .pt files.
 SPEED_READER_CODE = str(_ADAS / "experiments/traffic-sign_recognition/speed_limit_classifier")
