@@ -509,3 +509,175 @@ class. M2 trains on this order, so from here, append only.
 - [ ] Yellow imbalance: chevron 59 + other_warning 52 against left_curve 13 +
       right_curve 4. Synthesis is supposed to fix this by fiat. Check the
       confusion matrix before believing it.
+
+---
+
+## 2026-11-15 (evening) — M1 lands at R 0.82, M2 trains at 93.6%
+
+Both halves of v3 now have a number. The design entry above is unchanged by any
+of this; what follows is what happened when it met the data.
+
+### M1: the new footage bought recall, which is the thing that was broken
+
+`m1-floor16-b01b02`, yolo26n, 50 epochs, imgsz 1280, batch 8, `fliplr=0`.
+
+| run | P | R | mAP50 | mAP50-95 |
+|---|---|---|---|---|
+| floor16, b01 only | 0.903 | 0.689 | 0.814 | 0.684 |
+| **floor16, b01+b02** | 0.852 | **0.820** | **0.876** | **0.741** |
+
+The 2026-11-13 entry ended on *"R = 0.689 means M1 still misses 1 in 3 signs M2
+could have read"*. It now misses 1 in 5.6. Precision gave back 5 points to buy
+13 points of recall, which is the right trade for a detect-then-classify design:
+M2 has a reject class and can throw a false box away, but neither model can
+recover a sign M1 never boxed.
+
+Caveat worth saying out loud before anyone quotes the delta: **the two rows do
+not share a val set.** b01+b02 has 20 val clips where b01 alone had fewer, so
+this is "the model got better" and "the exam changed" at once. The honest claim
+is the direction, not the 6.2 points.
+
+### M2: built, and it works
+
+Four files, all of them small:
+
+| file | what |
+|---|---|
+| `fetch_art.py` | 20 public-domain drawings off Wikimedia Commons, 256px RGBA |
+| `m2_synth.py` | `sample(name)` -> a fresh degraded sign, drawn on demand |
+| `build_m2.py` | real crops -> `m2/{train,val}/<class>/`, 1285 + 932 |
+| `train_m2.py` | MobileNetV3-Small, 29 classes, 128px, ~8 min on MPS |
+
+**128px, not 64.** `speed_limit_classifier/train.py` had already measured this
+and written it down: MobileNetV3-Small downsamples 32x, so 64px leaves a 2x2
+final feature map and real accuracy went 72.2% -> 91.7% by changing one number.
+Reading our own notes was worth more than any architecture choice this week.
+
+**Nothing synthetic is written to disk.** `Mixed` holds the real crops plus N
+synthetic *slots*; each slot has a fixed class and draws a brand new sign every
+time it is asked for. There is no fixed synthetic set to memorise and the rare
+classes never run out.
+
+**Inverse-frequency sampling over real and synthetic together.** One straight
+epoch is 43% `not_a_sign` and 15% `information`; a model can score well on the
+micro number while never once saying `merge`.
+
+### The split had to change, and the reason was measurable
+
+M1's clip split left **5 of the 13 displayed classes with no scoreable val set**
+-- `left_curve` had 13 crops and every one of them was in train. Those are five
+blank cells on a slide, caused entirely by where the dice landed.
+
+So M2 picks its own clips. Two rules, in order:
+
+1. **Every clip M1 held out stays held out.** M2's val is a superset of M1's, so
+   no clip is ever in M1's val and M2's train at once, and an end-to-end demo on
+   an M1 val clip is honest for both models.
+2. **Then buy coverage**, rarest displayed class first, until each has 5 real
+   val crops or runs out of clips.
+
+10 of 13 scoreable, from 5. It costs train real crops of exactly the classes
+that have infinite synthetic ones -- six displayed classes now have **zero** real
+training crops and are trained purely on artwork. That is not a compromise, it
+is the `speed_limit_classifier` result applied on purpose: `keep_left` has 0
+train crops and scores 80-100%.
+
+`build_m2.py` asserts both rules against the data on every run.
+
+### The artwork was wrong, and only looking at the crops showed it
+
+The design entry called the artwork question *tested*. It was half-tested: the
+files downloaded and `degrade()` accepted them, which is not the same as the
+drawing being the one on the road.
+
+**The blue `b-38`/`b-43` turn signs do not appear once in our footage.** Every
+single `turn_left`/`turn_right` crop is the older style -- white disc, red ring,
+black bent arrow -- confirmed on a 100px crop where a prohibition bar would be
+unmissable. Commons has no code for it. But `b-8`/`b-9` ("no left/right turn")
+carry the identical arrow glyph under a bar, and the bar sits entirely inside
+r<0.85 while the ring is >=74% of every annulus outside it. `strip_bar()`
+deletes the bar; the drawing is then right. Both scored **100%**.
+
+Same mistake, caught the same way: 14 of the 22 `keep_left_or_right` crops are
+the yellow diamond `t-62`, not the blue circle `b-42`. Added. Also `t-3`/`t-4`
+(the sharp-bend curves) and `b-1-2` (English-only STOP).
+
+Lesson, and it is the same one as `other_warning` being half chevrons: **render
+the thing and look at it.** A table of sign codes is not evidence about footage.
+
+### review.py could only show two thirds of the boxes
+
+Found while trying to review a specific crop: `prelabel.py detect` cuts one crop
+per box *it proposed*, and that is the whole of `crops/`. A box drawn by hand in
+CVAT afterwards has a row in `reviewed.csv` and no image on disk, so `review.py`
+skipped it in silence -- **56 of b02-1's 547 boxes, including 8 of its 10
+`stop`s**. `fill_crops()` now cuts them on demand, the way `detect` does, rather
+than re-running `detect` and throwing away every name on the batch.
+
+### Two label passes, and the second one was found by the model
+
+87.0% on the first run, with one bad cell: `no_left_turn` at 50%, losing 4 of 8
+to `no_stopping_parking`. Rendering those four settled it in one look -- they
+are **blue discs with a red slash**. The model said "no stopping" and was marked
+wrong for being right. Same confusion as the `no_right_turn` crop caught the day
+before: a blue disc with a red slash keeps getting read as a turn ban.
+
+Then the model was pointed at the whole dataset: every crop where it disagrees
+with its label at >0.80 confidence. **27 out of 2217.** The labels are good.
+Most of the 27 are one group -- 15 boxes deleted in CVAT that the model calls
+bus-stop or information boards -- and that is a definition question (is a
+bus-stop shelter a sign?), not an error. Left alone.
+
+This is worth a slide of its own. The first number was 87%; four of its errors
+were the dataset's, not the model's. **Using the trained model as a label
+checker found them in one pass**, and that is a technique, not an accident.
+
+### Where M2 stands
+
+| sign on the dash | n | accuracy |
+|---|---|---|
+| no_left_turn | 12 | 100.0% |
+| no_right_u_turn | 5 | 100.0% |
+| turn_left | 7 | 100.0% |
+| turn_right | 8 | 100.0% |
+| speed_limit | 24 | 95.8% |
+| information | 150 | 96.0% |
+| stop | 10 | 90.0% |
+| keep_left_or_right | 9 | 88.9% |
+| left_curve | 7 | 85.7% |
+| keep_left | 5 | 80.0% |
+| no_right_turn | 4 | *not scored* |
+| right_curve | 4 | *not scored* |
+| keep_right | 0 | *not scored* |
+| **MACRO over 10** | **237** | **93.6%** |
+| dash stays quiet | 687 | 95.1% |
+
+"Dash stays quiet" is the second number and it is not decoration: when the sign
+is not one of the 13, naming the wrong helper class is invisible to a driver,
+and lighting up the dash is not.
+
+### Fixed in passing
+
+- `build_m2.py` did not wipe its output. The split is recomputed every run, so
+  the previous run's crops stayed behind and the same sign ended up in train
+  **and** val -- the one thing the clip split exists to prevent. Caught because
+  the trainer counted 1430/932 crops where the builder had just printed
+  1347/870. Two numbers that should match, printed where they can be compared.
+- `touches_edge` is done: `build_m2.py` drops any box within 2px of the frame
+  border. Correct for M1, poison for M2, and it was an open item since October.
+- The reject-class harvester is done: every `not_a_sign` box, which is exactly
+  where M1 fires and is wrong, plus two random squares off each of the 403
+  sign-free frames.
+
+### Open
+
+- [ ] Footage, still, and still unchanged by anything else: `keep_right` 0 clips,
+      `right_curve` 3, `no_right_turn` 3, `t_junction_right` 2.
+- [ ] End-to-end M1 -> M2 on a held-out clip. Nothing has run the two together
+      yet, and the live dash demo is exactly that.
+- [ ] Entropic Open-Set loss + OSCR, if M2 survives the presentation.
+- [ ] The 15 deleted boxes the model reads as bus-stop/information signs. Decide
+      whether a bus-stop board is `information` or `not_a_sign` and be consistent;
+      right now it is whatever the reviewer felt that minute.
+- [ ] `--synth 2400` and the 0.7-1.0 RandomResizedCrop were guesses that worked
+      first time. Nobody has tried a second value.

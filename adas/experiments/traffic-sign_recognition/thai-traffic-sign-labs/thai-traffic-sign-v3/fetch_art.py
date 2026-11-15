@@ -68,7 +68,7 @@ SIGNS = {
 DERIVED = {"turn_left__red-ring": "บ-8", "turn_right__red-ring": "บ-9"}
 RING = 0.85   # measured on b-8: the ring is >=74% of every annulus from here
               # out and the bar is <=30% inside it, so the cut is not a
-              # judgement call. See JOURNAL 2026-11-16.
+              # judgement call. See JOURNAL 2026-11-15 (evening).
 
 
 def strip_bar(im):
