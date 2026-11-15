@@ -92,6 +92,9 @@ class Scheduler:
                      "copy b01.pt there (see adas/experiments/central/README.md) or pass --weights")
         detector = SignDetector(config.SIGN_WEIGHTS, config.SIGN_IMGSZ, config.SIGN_CONF,
                                 config.SIGN_DEVICE)
+        print(f"signs: {config.SIGN_WEIGHTS} on "
+              f"{'the Hailo AI HAT' if detector.on_hailo else (config.SIGN_DEVICE or 'auto (CPU/GPU)')}",
+              file=sys.stderr)
         reader = vote = None
         if Path(config.SPEED_READER).is_file():
             from signs.speed import load_reader

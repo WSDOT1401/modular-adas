@@ -46,7 +46,11 @@ CLEAR_FRAMES = 5
 
 # --- Traffic signs (adas/experiments/central: the two models that ship) ------
 # The .pt files are gitignored: copy them in by hand (see that folder's README).
-SIGN_WEIGHTS = str(_ADAS / "experiments/central/b01.pt")
+# On a Pi with an AI HAT, b01 runs on the Hailo chip: tools/export_hailo.py
+# compiles it into central/b01_hailo_model/, used whenever that folder is
+# there. Without it, b01.pt runs on the CPU.
+_HAILO_SIGNS = _ADAS / "experiments/central/b01_hailo_model"
+SIGN_WEIGHTS = str(_HAILO_SIGNS if _HAILO_SIGNS.is_dir() else _ADAS / "experiments/central/b01.pt")
 SPEED_READER = str(_ADAS / "experiments/central/speed_reader.pt")
 # classify.py, which loads speed_reader.pt; on the Pi, copy it next to the .pt files.
 SPEED_READER_CODE = str(_ADAS / "experiments/traffic-sign_recognition/speed_limit_classifier")

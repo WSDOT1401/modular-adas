@@ -9,6 +9,7 @@ float}`` with the box in the frame's own pixels.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Optional
 
 import numpy as np  # type: ignore
@@ -22,7 +23,10 @@ class SignDetector:
         self._model = YOLO(weights)
         self._imgsz = imgsz
         self._conf = conf
-        self._device = device
+        # A compiled Hailo model (a folder with a .hef) runs on the AI HAT and
+        # picks its own device; a .pt runs where `device` says.
+        self.on_hailo = Path(weights).is_dir()
+        self._device = None if self.on_hailo else device
 
     def detect(self, frame: "np.ndarray") -> "List[dict]":
         """Detect traffic signs in a BGR frame."""
