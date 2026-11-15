@@ -43,6 +43,7 @@ import argparse
 import collections
 import csv
 import random
+import shutil
 import sys
 from pathlib import Path
 
@@ -198,9 +199,13 @@ def main():
             x, y = rng.randint(0, W - s), rng.randint(0, H - s)
             crops.append((img, clip, REJECT, (x, y, x + s, y + s), f"{img.stem}_bg{i}"))
 
+    # Wipe first. The split is recomputed every run, so keeping old crops leaves
+    # the same sign in train AND val -- which is the one thing this whole script
+    # exists to prevent.
+    shutil.rmtree(out, ignore_errors=True)
     for split in ("train", "val"):
         for name in list(NAMES) + [REJECT]:
-            (out / split / name).mkdir(parents=True, exist_ok=True)
+            (out / split / name).mkdir(parents=True)
 
     counts, opened = collections.Counter(), (None, None)
     for img, clip, name, box, key in sorted(crops, key=lambda c: c[0]):
