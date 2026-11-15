@@ -21,9 +21,13 @@ SOURCE = "camera"              # "camera" (Picamera2) | "file" (replay a clip)
 CLIP_PATH = "tests/fixtures/sample_drive.mp4"   # used when SOURCE == "file"
 REPLAY_REALTIME = True         # file: keep the clip's pace, dropping frames like a camera would
 REPLAY_LOOP = False            # file: start again at the end
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 480
-TARGET_FPS = 15
+# Camera Module 3 (IMX708): its full resolution, 4608x2592, runs at 14 fps.
+# main.py --camera binned: 2304x1296 at 30 fps, same view, half the pixels
+# on each sign (see capture/picamera2_source.py).
+FRAME_WIDTH = 4608
+FRAME_HEIGHT = 2592
+TARGET_FPS = 14
+CAMERA_MODES = {"full": (4608, 2592, 14), "binned": (2304, 1296, 30)}
 
 # --- Region of interest / perspective (calibrate per vehicle) --------------
 ROI_TOP = 0.55                 # ignore everything above this fraction of height

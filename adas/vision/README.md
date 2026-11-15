@@ -9,8 +9,9 @@ soon, lane position) → decide on a warning → **push the event over UDP to
 
 - **Traffic signs: running.** The two shipping models (b01 detector and the
   speed reader, in [`adas/experiments/central`](../experiments/central/)) find
-  Thai signs and read speed limits; the display shows them. Runs on a dashcam
-  clip today; the Pi camera backend is still TODO.
+  Thai signs and read speed limits; the display shows them. Runs on the Pi
+  camera (Camera Module 3) or a dashcam clip, on the AI HAT+ 2 when it's
+  fitted (see [AI HAT](#ai-hat)).
 - **Lane departure:** the decision + publish path is real and tested; the CV
   stages (`lane.preprocess` / `lane.detector`) are stubs, so `lane` is not in
   `config.STAGES` yet and the display shows it as switched off.
@@ -23,7 +24,7 @@ main.py                  entry point + arg parsing; runs runtime.Scheduler
 config.py                all tunables (camera, ROI, thresholds, hysteresis, UDP)
 capture/
   base.py                FrameSource abstraction consumed by the scheduler
-  picamera2_source.py    Pi CSI camera backend                          (TODO)
+  picamera2_source.py    Pi CSI camera (Camera Module 3), full resolution by default
   video_replay_source.py OpenCV clip replay, real-time pace (off-Pi dev)
 lane/
   preprocess.py          ROI mask + edge extraction                     (TODO)
@@ -32,6 +33,7 @@ lane/
   departure.py           offset -> warning state + direction (hysteresis) ← real, tested
 signs/
   detector.py            b01 YOLO: frame -> sign boxes + Thai class names
+  hailo10.py             the same on the AI HAT+ 2, 3 frames in flight (+ HAT stats)
   tracker.py             one event per physical sign, not one per frame
   speed.py               loads the speed reader (classify.py) and its vote
   pipeline.py            detections -> sign_seen / speed_limit keys
@@ -43,6 +45,8 @@ runtime/
   health.py              FPS / drops / SoC temp watchdog                (TODO)
 tools/
   bench.py               a clip as the camera: vision + speed sim + display, one command
+  hat_monitor.py         live AI HAT load / fps / latency / temperature (btop can't see it)
+  export_hailo.py        compile b01 for the AI HAT (in WSL / Linux x86_64)
   mock_lane_writer.py    synthetic warnings over UDP (works, no camera)
   calibrate.py           interactive ROI/warp calibration               (TODO)
   record_clip.py         record a clip into tests/fixtures/             (TODO)
@@ -70,7 +74,8 @@ The weights are not in git (`.pt` is ignored). Copy `b01.pt` and
 
 ```bash
 cd adas/vision
-python main.py                                        # Pi camera (backend still TODO)
+python main.py                                        # Pi camera, 4608x2592 at 14 fps
+python main.py --camera binned                        # Pi camera, 2304x1296 at 30 fps
 python main.py --source file --clip drive.mp4         # replay a dashcam clip at its own pace
 python main.py --source file --clip drive.mp4 --preview   # ...with the boxes drawn in a window
 ```
@@ -107,6 +112,29 @@ it. Each event is also printed: `[  12.4 s] {'sign_seen': 'speed_limit',
 On a PC without a GPU, b01 at 1280 px runs at a few frames a second; the
 replay drops frames to stay in real time, as the Pi would. `--every-frame`
 shows what the model finds when it sees every frame.
+
+### AI HAT
+
+With the AI HAT+ 2 fitted and its software installed (`hailo-h10-all`), b01
+runs on the HAT whenever `adas/experiments/central/b01_hailo_model/` is there
+(compile it with `tools/export_hailo.py`). Measured on the Pi 5:
+
+| source | frames | HAT load | Pi CPU (vision) |
+|---|---|---|---|
+| camera, full (4608x2592) | 14 fps, the sensor's most | 27 % | ~65 % of one core |
+| camera, binned (2304x1296) | 30 fps | 59 % | ~110 % |
+| dashcam clip 2560x1440 | 20 fps | | one core |
+
+Full resolution has twice the pixels across each sign for the speed reader;
+binned sees each sign in twice as many frames. b01 on the Pi's CPU alone:
+0.9 fps.
+
+btop doesn't show the HAT. While the vision service runs, in another
+terminal on the Pi:
+
+```bash
+python3 tools/hat_monitor.py
+```
 
 ## Test
 

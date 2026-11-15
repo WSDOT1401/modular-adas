@@ -37,6 +37,8 @@ def main() -> int:
     ap.add_argument("--every-frame", action="store_true",
                     help="file: process every frame instead of keeping real time")
     ap.add_argument("--loop", action="store_true", help="file: replay the clip forever")
+    ap.add_argument("--camera", choices=sorted(config.CAMERA_MODES), default="full",
+                    help="camera: full = 4608x2592 at 14 fps, binned = 2304x1296 at 30 fps")
     ap.add_argument("--preview", action="store_true", help="show frames with the detected boxes")
     ap.add_argument("--display", metavar="HOST", default=None,
                     help="send to a display on another machine (e.g. the Pi's IP), "
@@ -44,6 +46,7 @@ def main() -> int:
     args = ap.parse_args()
 
     config.SOURCE = args.source
+    config.FRAME_WIDTH, config.FRAME_HEIGHT, config.TARGET_FPS = config.CAMERA_MODES[args.camera]
     if args.clip:
         config.CLIP_PATH = args.clip
     if args.weights:

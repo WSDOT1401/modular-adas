@@ -14,9 +14,17 @@ on the Pi its per-frame torch pre/post-processing costs more CPU than the
 chip time. Here the letterbox is a cv2 pad and the decode is numpy on the
 anchors that clear the threshold, matching ultralytics' (b01 is YOLO26 with
 the one-to-many head: ltrb distances, sigmoid scores, NMS per class).
+
+btop can't see the HAT, and on the Hailo-10H HailoRT 5.1.1's own
+``hailortcli monitor`` shows nothing (not supported there yet). So once a
+second this writes the chip's fps, load, latency and temperature to
+:data:`STATS_FILE`; ``tools/hat_monitor.py`` shows them live.
 """
 from __future__ import annotations
 
+import json
+import os
+import time
 from collections import deque
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -27,6 +35,11 @@ _TIMEOUT_MS = 10_000
 _PAD = 114          # ultralytics' letterbox grey
 _IOU = 0.7          # ultralytics' NMS default
 _MAX_DET = 300
+
+STATS_FILE = Path("/dev/shm/adas-hat.json")
+# Most the chip does with b01.hef and this many frames in flight (measured on
+# the AI HAT+ 2): the "100%" of the load figure.
+_MAX_FPS = {1: 18.0, 2: 35.0, 3: 51.0, 4: 59.0}
 
 
 class HailoSignDetector:
@@ -45,6 +58,10 @@ class HailoSignDetector:
         self._conf = conf
         self._logit = float(np.log(conf / (1 - conf)))   # sigmoid(x) > conf  <=>  x > logit
 
+        # For `hailortcli monitor`, once a HailoRT that supports it on the
+        # Hailo-10H is installed (5.1.1 doesn't). Must be set before the VDevice.
+        os.environ.setdefault("HAILO_MONITOR", "1")
+        self._hef_name = hef_file.name
         hef = HEF(str(hef_file))
         self._size = hef.get_input_vstream_infos()[0].shape[0]       # 1280 (square)
         order = [o.name for o in hef.get_output_vstream_infos()]
@@ -67,6 +84,8 @@ class HailoSignDetector:
         self._depth = depth
         self._inflight: deque = deque()   # (job, bindings, input, frame, scale, pad)
         self._anchors, self._strides = self._make_anchors(shapes)
+        self._chips = self._device.get_physical_devices()   # kept: the control dies with it
+        self._stats_t, self._stats_n, self._stats_lat = time.monotonic(), 0, 0.0
 
     def _make_anchors(self, shapes: dict) -> Tuple[np.ndarray, np.ndarray]:
         points, strides = [], []
@@ -102,8 +121,11 @@ class HailoSignDetector:
         bindings = self._free.pop()
         bindings.input().set_buffer(img)
         self._configured.wait_for_async_ready(timeout_ms=_TIMEOUT_MS)
-        job = self._configured.run_async([bindings])
-        self._inflight.append((job, bindings, img, frame, r, pad))
+        done_at: list = []                    # set by HailoRT's thread when the chip is done
+        sent = time.monotonic()
+        job = self._configured.run_async(
+            [bindings], lambda completion_info: done_at.append(time.monotonic()))
+        self._inflight.append((job, bindings, img, frame, r, pad, sent, done_at))
         return done
 
     def detect(self, frame: np.ndarray) -> "List[dict]":
@@ -115,8 +137,11 @@ class HailoSignDetector:
 
     # ---- detections out ---------------------------------------------------------
     def _finish(self, item) -> "Tuple[np.ndarray, List[dict]]":
-        job, bindings, _img, frame, r, pad = item
+        job, bindings, _img, frame, r, pad, sent, done_at = item
         job.wait(_TIMEOUT_MS)
+        self._stats_n += 1
+        self._stats_lat += (done_at[0] if done_at else time.monotonic()) - sent
+        self._write_stats()
         logits = np.concatenate([bindings.output(n).get_buffer().reshape(-1, len(self.names))
                                  for n in self._cls_names])
         dist = np.concatenate([bindings.output(n).get_buffer().reshape(-1, 4)
@@ -149,8 +174,40 @@ class HailoSignDetector:
                         "score": float(score[i])})
         return out
 
+    # ---- stats for tools/hat_monitor.py -------------------------------------------
+    def _write_stats(self) -> None:
+        now = time.monotonic()
+        span = now - self._stats_t
+        if span < 1.0:
+            return
+        fps = self._stats_n / span
+        cap = _MAX_FPS.get(self._depth)
+        try:
+            t = self._chips[0].control.get_chip_temperature()
+            temp = round(max(t.ts0_temperature, t.ts1_temperature), 1)
+        except Exception:            # noqa: BLE001 - a missed reading isn't worth a crash
+            temp = None
+        stats = {
+            "time": time.time(), "pid": os.getpid(), "model": self._hef_name,
+            "fps": round(fps, 1), "max_fps": cap,
+            "load": round(min(fps / cap, 1.0), 3) if cap else None,
+            "latency_ms": round(self._stats_lat / self._stats_n * 1000, 1) if self._stats_n else None,
+            "in_flight": len(self._inflight), "depth": self._depth, "temp_c": temp,
+        }
+        self._stats_t, self._stats_n, self._stats_lat = now, 0, 0.0
+        try:
+            tmp = STATS_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(stats))
+            os.replace(tmp, STATS_FILE)
+        except OSError:
+            pass
+
     def close(self) -> None:
         while self._inflight:
             self._inflight.popleft()[0].wait(_TIMEOUT_MS)
         self._configured.__exit__(None, None, None)
         self._device.release()
+        try:
+            STATS_FILE.unlink()
+        except OSError:
+            pass
