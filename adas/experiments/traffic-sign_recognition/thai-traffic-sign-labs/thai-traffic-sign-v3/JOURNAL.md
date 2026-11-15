@@ -94,6 +94,9 @@ yet and probably should, since "catch it once" is the actual requirement.
 
 ## 2026-11-13 — M2: brainstorm, PAUSED on data
 
+> **Superseded by the 2026-11-15 entry.** Kept because its reasoning still
+> holds: only its conclusion (pause and go film) was overtaken by a deadline.
+
 Not an experiment. A design session that stopped before any run, because the
 blocker turned out to be footage, not model choice. Written down so the next
 session starts here instead of re-deriving it.
@@ -318,3 +321,191 @@ becomes real after the CVAT pass.
       through a batch and can say whether it felt redundant or thin.
 - [ ] The 720p question from earlier the same day: M1 is unaffected (it already
       downsamples 2304 → 1280×720), M2 loses 1.8× of crop size. Film closer.
+
+---
+
+## 2026-11-15 — M2: design settled, and seven classes pulled out of the catch-alls
+
+Supersedes the PAUSED entry above. That one stopped because the measurement hole
+looked fatal. It still exists — it just stopped being a reason not to build.
+
+### What actually changed the design
+
+The deadline is a **presentation next week**, and the cost of a wrong answer is
+credibility in a room, not a missed sign on the road. That inverts two things:
+
+- **"Not sure" becomes a good answer.** To a driver, silence is useless. To an
+  examiner it reads as a model that knows its own limits.
+- **The measurement hole is the main risk, not a footnote.** "What is your
+  per-class accuracy?" is the question that always gets asked, and five classes
+  answered it with n≤3.
+
+Decision: say the hole out loud on the slide rather than paper over it.
+
+### Decisions
+
+6. **M2 is trained on 28 names + `not_a_sign`, and displays 13.** The other 15
+   map to "dash stays quiet" — identical on screen to rejecting them, but a far
+   easier thing to learn. See *the catch-all problem* below.
+7. **`keep_right` stays in** at 0 real crops. Synthesis can train it; nothing can
+   score it. On the road that is a right answer we would otherwise have thrown
+   away; on the slide it is a blank cell with a reason. Both are fine. The
+   alternative — dropping it — turns every real `keep_right` into a confident
+   `keep_left`, because they are the same blue circle.
+8. **Test on real crops only, split by clip.** Never on synthetic. This is the
+   `speed_limit_classifier` precedent (train synthetic, test real, 86.8%) and it
+   is the only split that means anything. Splitting real crops at random would
+   put the same physical sign on both sides, because one sign repeats across
+   frames inside a clip.
+9. **Report macro-average over the 13, not micro.** `information` is 357 of 535
+   readable crops in the displayed set — a micro number is mostly a report card
+   on blue boards wearing a coat that says "traffic sign recognition". Print `n`
+   beside every class, and print *not scored* rather than a number for anything
+   under 5 real crops. A class with 2 crops can only score 0/50/100; averaging
+   that into the headline gives one crop a 4-point vote.
+
+### The catch-all problem
+
+The first shape of decision 6 was one `other_sign` bucket for everything outside
+the 13. Rejected, and the objection came from the right place: a class that is
+"a pile of unrelated things" is the hardest kind to learn.
+
+That objection is in the literature. *Reducing Network Agnostophobia* (Dhamija
+et al., NeurIPS 2018) finds background/garbage classes "generally insufficient",
+and proposes Entropic Open-Set loss instead — train unknowns toward a flat
+softmax, so "I don't know" is *no opinion* rather than *a vote for the garbage
+bin*. It beats both softmax-thresholding and a background class at low FPR.
+
+We are **not** doing that this week: it is a custom loss and a new metric (OSCR)
+with six days left. It goes on the slide as "what we would do next", which is a
+better thing to say than nothing.
+
+What we are doing instead is **Background Splitting** (Mullapudi et al., CVPR
+2021): cut the catch-all into coherent subclasses and train on those. Their
+reported swing is mAP 10.6 → 52.9 in the most imbalanced case. The expensive
+part of their method is *inventing* subclass labels with a pre-trained model —
+we skip it entirely, because CVAT already gave us real ones.
+
+So the split ran against our own labels, by eye, off contact sheets:
+
+| pulled out | from | readable (≥24px) |
+|---|---|---|
+| `chevron` | other_warning | 59 |
+| `merge` | other_warning | 12 |
+| `crossroads` | other_warning | 12 |
+| `railway_crossing` | other_warning | 7 |
+| `mandatory_direction` | other_regulatory | 15 |
+| `no_pedestrians` | other_regulatory | 10 |
+| `height_limit` | other_regulatory | 7 |
+
+`chevron` was the big one and the obvious one in hindsight: ~half of
+`other_warning` was a single drawing. It is also the nearest neighbour to
+`left_curve`/`right_curve` — yellow, black, directional — so leaving it unnamed
+put 59 distractors against their 17 real crops.
+
+Result: the two catch-alls went **152 → 78** readable crops. Stopping rule was
+~6 crops; a group smaller than that does almost no harm sitting in the bucket,
+and every extra name costs a reviewer a decision on every 30 px crop they see.
+
+Incidental: the pass turned up 2 more `stop` (8 → 10). Something real *was*
+hiding in there.
+
+### Synthetic data: the untested guess, now tested
+
+The PAUSED entry guessed that feeding official sign artwork through `degrade()`
+would beat drawing pictograms in PIL, and flagged it **untested**. Tested:
+
+**All 12 pictogram classes are on Wikimedia Commons as SVG, Public domain,
+author "Government of Thailand".** Commons renders SVG→PNG server-side, so there
+is no rasteriser dependency either — one download script, no new packages.
+Codes: `บ-1`/`บ-1-1` stop, `บ-6` no right U-turn, `บ-8`/`บ-9` no left/right turn,
+`บ-32-N` speed limit, `บ-38`/`บ-43` turn left, `บ-39`/`บ-44` turn right,
+`บ-40`/`บ-41`/`บ-42` keep left/right/either, `ต-1`/`ต-2` left/right curve.
+
+Three things the wiki table did not say, found by rendering them and looking:
+
+- **Three classes are two drawings each.** `turn_left` is both `บ-38` (straight
+  arrow pointing left) and `บ-43` (bent arrow); `turn_right` likewise; `stop` is
+  both Thai-only and bilingual. Synthesize one variant and the model learns half
+  the class.
+- **`degrade()` plugs in unmodified** — it takes a 256 px RGBA and uses the alpha
+  channel as its paste mask. Download at **256**, and `.convert("RGBA")` on load:
+  the two yellow curve diamonds come back palette-mode, and without the convert
+  they paste as opaque squares and the model learns "yellow square = curve".
+- **Keep `synth.py` for `speed_limit`.** The SVG `บ-32` is an idealised sign.
+  `synth.py` already draws the variants copied off our own crops — yellow and
+  orange backing boards, sun-bleached rings, `Km/h` subtext, red digits — and it
+  scored 86.8%. Do not swap tested code for cleaner artwork.
+
+`information` still cannot be synthesized (a family of boards with arbitrary
+content, not one drawing) and does not need to be: 357 readable real crops.
+
+### The dataset, after `prelabel.py build`
+
+1228 frames, 1610 boxes, 953 train / 275 val (82 train clips / 20 val),
+**403 background frames** for the reject class. 1309 readable crops: 535 in the
+displayed 13, 774 in the helpers.
+
+| displayed | ≥24px | clips | | helper | ≥24px |
+|---|---|---|---|---|---|
+| information | 357 | 46 | | no_stopping_parking | 246 |
+| speed_limit | 57 | 24 | | pedestrian_crossing | 230 |
+| keep_left_or_right | 22 | 13 | | chevron | 59 |
+| no_left_turn | 20 | 8 | | u_turn | 56 |
+| no_right_u_turn | 18 | 5 | | other_warning | 52 |
+| turn_right | 15 | 5 | | other_regulatory | 26 |
+| left_curve | 13 | 6 | | t_junction_left | 19 |
+| stop | 10 | 5 | | reserved_for_bus | 19 |
+| turn_left | 9 | 4 | | mandatory_direction | 15 |
+| no_right_turn | 5 | 3 | | merge | 12 |
+| keep_left | 5 | 5 | | crossroads | 12 |
+| right_curve | **4** | 3 | | no_pedestrians | 10 |
+| keep_right | **0** | 0 | | height_limit / railway_crossing | 7 / 7 |
+
+Three classes cannot be scored and will not be without footage: `keep_right`
+(0), `right_curve` (4), `t_junction_right` (4).
+
+### What the pipeline had to change
+
+Running `review.py` **after** a CVAT pass used to be a silent no-op, and we hit
+it live: `review.py` writes `predictions.csv`, `build` reads `reviewed.csv`, and
+the two never met. 95 renames went nowhere before anyone noticed.
+
+- `review.py` now carries names into `reviewed.csv` on exit (`sync_reviewed`),
+  limited to crops settled in that run — `predictions.csv` still holds the
+  pre-CVAT guess for everything else, and syncing those would undo CVAT wholesale.
+- `--only` now filters on `reviewed.csv` when it exists. It was queueing the
+  stale pre-CVAT label: on b01 that meant **332 crops, 192 of them pointless**
+  (87 had already had their box deleted in CVAT) while missing 27 real ones.
+  Corrected queue: 165.
+- `not_a_sign`/`dont_know` from a crop view are **refused and listed by name**,
+  not silently dropped. A box can only be deleted in CVAT, where the whole frame
+  is visible; `dont_know` is worse still, because `build` throws away the entire
+  frame and every correctly-boxed sign on it.
+- `review.py --selfcheck` covers the three ways the sync can go wrong.
+
+The refusal list immediately paid for itself: 28 crops came back, and they were
+not non-signs — **24 of 28 were under 24 px**, i.e. "too small to tell". Two of
+the four large ones were real warning signs the refusal saved. `classes.py` had
+already written this rule in October: *`other_*` means "clearly a sign, legible,
+just not on this list" — never "too blurry to tell".* At 15–20 px the honest key
+is SPACE, not `x`.
+
+**Class order is now frozen.** Seven names were inserted inside their parent
+groups rather than appended at the end, so indices shifted. Safe only because
+nothing has been trained on `thai_fine` yet — M1 collapses all of them to one
+class. M2 trains on this order, so from here, append only.
+
+### Open
+
+- [ ] `keep_right` 0 clips, `right_curve` 3, `t_junction_right` 2. Still the
+      footage shopping list, still unchanged by any amount of synthesis.
+- [ ] Edge-clipped boxes (carried over): correct for M1, poison for M2. The
+      script that cuts M2's crops needs `touches_edge()`. Still nothing enforces it.
+- [ ] Entropic Open-Set loss + OSCR, if M2 survives the presentation.
+- [ ] The reject class has no harvester yet. `not_a_sign` boxes are preserved
+      with their coordinates — exactly where M1 falsely fires at conf 0.15, which
+      is the best negative set we will ever get for free. Nothing reads them.
+- [ ] Yellow imbalance: chevron 59 + other_warning 52 against left_curve 13 +
+      right_curve 4. Synthesis is supposed to fix this by fiat. Check the
+      confusion matrix before believing it.

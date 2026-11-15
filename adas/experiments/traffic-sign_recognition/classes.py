@@ -50,6 +50,16 @@ THAI3_NAMES = ["Regulatory", "Warning", "Information"]
 # As with THAI3_NAMES: this order IS the class order in data.yaml and in every
 # exported model. Append, never reorder.
 #
+# (Exception, 2026-11-15: seven names appended inside their own parent rather
+# than at the end -- chevron/merge/railway_crossing/crossroads under Warning,
+# no_pedestrians/mandatory_direction/height_limit under Regulatory -- so every
+# name after each insertion shifts. Safe only because nothing has been trained
+# on thai_fine yet; M1 collapses all of these to a single class. M2 trains on
+# this order, so from here it really is frozen.
+#
+# All seven came out of other_regulatory/other_warning, never out of a real
+# class: splitting a catch-all is free, merging two real classes is not.)
+#
 # (Exception, 2026-09-23: reserved_for_pedestrians -> pedestrian_crossing, moved
 # Regulatory -> Warning. Indices shifted, which is safe only because nothing has
 # been trained on thai_fine yet. From here on, append.)
@@ -83,6 +93,16 @@ THAI_FINE_BY_PARENT: dict[str, tuple[str, ...]] = {
         "turn_left",
         "turn_right",
         "reserved_for_bus",
+        # Split out of other_regulatory on 2026-11-15, same reasoning as
+        # `chevron`: each was a visually unmistakable block inside the bucket,
+        # and a bucket the model cannot tell apart from itself is the one thing
+        # background-splitting says not to hand it. Counts are small on purpose
+        # -- a group under ~6 crops was left in the catch-all, because another
+        # name costs a reviewer a decision on every 30 px crop they see.
+        "no_pedestrians",      # walking figure, red ring, slash
+        "mandatory_direction", # black arrow in a RED ring -- not the blue
+                               # turn_left/turn_right, which command a turn
+        "height_limit",        # "5.00 ม." between two triangles
         "other_regulatory",
     ),
     "Warning": (
@@ -95,6 +115,19 @@ THAI_FINE_BY_PARENT: dict[str, tuple[str, ...]] = {
         # different supercategory. It is the single most common sign in
         # this footage (32 of the first 73 gold crops).
         "pedestrian_crossing",
+        # Yellow board, one fat black arrow, planted in a row around the outside
+        # of a bend. Split out of other_warning on 2026-11-15 because it was
+        # roughly half that bucket -- 229 crops of one drawing sitting in the
+        # catch-all, which is the thing a catch-all is supposed not to be. It is
+        # also the nearest neighbour to left_curve/right_curve (yellow, black,
+        # directional), so leaving it unnamed put 229 distractors against their
+        # 19 real crops. One class, not chevron_left/right: nothing downstream
+        # reads the direction, and asking a reviewer to call left-vs-right on a
+        # 30 px crop buys noise.
+        "chevron",
+        "merge",            # Y-shaped arrow, two lanes becoming one
+        "railway_crossing", # the picket-fence pictogram
+        "crossroads",       # "+", and the plain "T" side-road variant
         "other_warning",
     ),
     # Thai Information signs are mostly text and direction boards with no fixed

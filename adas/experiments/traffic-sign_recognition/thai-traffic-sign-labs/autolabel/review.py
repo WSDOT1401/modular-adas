@@ -16,6 +16,8 @@ twenty right ones -- the same reason a contact sheet beats a spreadsheet.
 from __future__ import annotations
 
 import argparse
+import collections
+import pathlib
 import sys
 
 import prelabel as P
@@ -42,12 +44,21 @@ def review(d, only=None, todo=False) -> None:
     done = {r["crop_id"] for r in P.rows(d / "confirmed.csv")}
     smap = P.rows(P.need(d, "source_map.csv", "detect"))
 
+    # After a CVAT pass, reviewed.csv is the truth -- it holds the boxes a human
+    # fixed and the names chosen there. Filter and display from it, or --only
+    # queues the stale pre-CVAT guess and offers up crops CVAT already deleted.
+    rev, at = reviewed_rows(d, smap)
+    cur = dict(pred)
+    cur.update({c: rev[i]["label"] for c, i in at.items()})
+
     queue = [r["crop_id"] for r in smap if (d / "crops" / f"{r['crop_id']}.jpg").exists()]
+    if at:
+        queue = [c for c in queue if c in at]
     if only:
-        queue = [c for c in queue if pred.get(c) == only]
+        queue = [c for c in queue if cur.get(c) == only]
     if todo:
         queue = [c for c in queue if c not in done]
-    queue.sort(key=lambda c: (pred.get(c, "~"), c))
+    queue.sort(key=lambda c: (cur.get(c, "~"), c))
     if not queue:
         sys.exit("nothing to review (try without --todo, or check --only spelling)")
 
@@ -56,6 +67,10 @@ def review(d, only=None, todo=False) -> None:
           f"type to rename (TAB cycles, ENTER takes it) · b back · q save+quit")
 
     i, typed, pick = 0, "", 0
+    # Only what gets settled in THIS run may be written back to reviewed.csv.
+    # predictions.csv still holds the pre-CVAT guess for every crop nobody has
+    # re-opened since, and syncing those would undo the CVAT pass wholesale.
+    touched = set()
     while 0 <= i < len(queue):
         cid = queue[i]
         img = cv2.imread(str(d / "crops" / f"{cid}.jpg"))
@@ -66,7 +81,7 @@ def review(d, only=None, todo=False) -> None:
         view = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_NEAREST)
         bar = view.copy() * 0
         cands = match(typed)
-        guess = pred.get(cid, "?")
+        guess = cur.get(cid, "?")
         line1 = f"[{i+1}/{len(queue)}] {guess}" + ("  (confirmed)" if cid in done else "")
         line2 = (f"> {typed}_   {cands[pick % len(cands)] if cands else 'no match'}"
                  if typed else "SPACE=yes  x=not_a_sign  b=back  q=quit")
@@ -78,6 +93,7 @@ def review(d, only=None, todo=False) -> None:
         def settle(name):
             pred[cid] = name
             done.add(cid)
+            touched.add(cid)
             save(d, smap, pred, done)
 
         if k in (ord(" "), ord("y"), 13) and not typed:
@@ -106,7 +122,117 @@ def review(d, only=None, todo=False) -> None:
     cv2.destroyAllWindows()
     save(d, smap, pred, done)
     print(f"{len(done)}/{len(queue)} confirmed -> {d/'confirmed.csv'}")
-    print(f"\nNext: prelabel.py to-cvat {d.name.split('-')[0]}")
+    n, refused = sync_reviewed(d, [r for r in smap if r['crop_id'] in touched], pred)
+    if (d / "reviewed.csv").exists():
+        print(f"{n} name(s) carried into {d/'reviewed.csv'}")
+        if refused:
+            print(f"\n  !! {len(refused)} NOT applied -- a box can only be deleted in "
+                  f"CVAT, where you can see the whole frame:")
+            for cid, lab in sorted(refused.items()):
+                print(f"       {cid}  ({lab})")
+        print("\nNext: prelabel.py build")
+    else:
+        print(f"\nNext: prelabel.py to-cvat {d.name.split('-')[0]}")
+
+
+def reviewed_rows(d, smap):
+    """(reviewed.csv rows, crop_id -> row index), or ([], {}) before a CVAT pass.
+
+    reviewed.csv is keyed by frame and box, predictions.csv by crop, so the two
+    only meet through overlap. A crop absent from the result had its box deleted
+    in CVAT: it is not in the dataset, so it is not worth a reviewer's keystroke.
+    """
+    f = d / "reviewed.csv"
+    if not f.exists():
+        return [], {}
+    rev = list(P.rows(f))
+    by_frame = collections.defaultdict(list)
+    for i, r in enumerate(rev):
+        by_frame[r["frame_id"]].append(
+            (i, tuple(float(r[k]) for k in ("x1", "y1", "x2", "y2"))))
+    at, taken = {}, set()
+    for r in smap:
+        box = tuple(float(r[k]) for k in ("x1", "y1", "x2", "y2"))
+        best, score = None, 0.0
+        for i, b in by_frame.get(r["frame_id"], []):
+            v = P.iou(box, b)
+            if i not in taken and v > score:
+                best, score = i, v
+        if best is not None and score >= 0.5:
+            at[r["crop_id"]] = best
+            taken.add(best)
+    return rev, at
+
+
+def sync_reviewed(d, smap, pred) -> int:
+    """Carry renames into reviewed.csv, which is what `prelabel.py build` reads.
+
+    This file only exists after a CVAT pass, and renaming here afterwards used to
+    go nowhere: review.py writes predictions.csv (keyed by crop) and build reads
+    reviewed.csv (keyed by frame + box), so the two never met. Match them back by
+    overlap and copy the name across.
+
+    Names only. Boxes are left exactly as CVAT has them, and a SPECIAL is never
+    written back, because CVAT showed a human the whole frame -- it is the better
+    judge of where a box belongs and whether it is a sign at all. `dont_know` is
+    worse still: build drops the entire frame, taking every correctly-boxed sign
+    on it. So those keystrokes are refused here -- but returned, not swallowed,
+    because a refusal nobody is told about is the bug this function exists to fix.
+
+    Returns (names written, {crop_id: refused label}).
+    """
+    rev, at = reviewed_rows(d, smap)
+    if not rev:
+        return 0, {}
+    n, refused = 0, {}
+    for r in smap:
+        name = pred.get(r["crop_id"], "")
+        i = at.get(r["crop_id"])
+        if i is None or name not in P.IDX:
+            continue
+        if name in P.SPECIAL:
+            refused[r["crop_id"]] = name
+            continue
+        if rev[i]["label"] != name:
+            rev[i]["label"] = name
+            n += 1
+    if n:
+        P.write_rows(d / "reviewed.csv",
+                     ["frame_id", "x1", "y1", "x2", "y2", "label"],
+                     [tuple(r[k] for k in ("frame_id", "x1", "y1", "x2",
+                                           "y2", "label")) for r in rev])
+    return n, refused
+
+
+def selfcheck() -> None:
+    """sync_reviewed writes the file the dataset is cut from, so it gets a check.
+
+    Covers the three ways it can go wrong: a rename must land, a SPECIAL must not
+    (CVAT is the better judge of "is this a sign"), and a crop whose box CVAT
+    moved far away must not drag an unrelated box's name with it.
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        d = pathlib.Path(t)
+        P.write_rows(d / "reviewed.csv",
+                     ["frame_id", "x1", "y1", "x2", "y2", "label"],
+                     [("f1", "10", "10", "50", "50", "other_warning"),
+                      ("f1", "200", "200", "240", "240", "information"),
+                      ("f2", "10", "10", "50", "50", "other_warning")])
+        smap = [{"crop_id": "c0", "frame_id": "f1", "x1": "10", "y1": "10",
+                 "x2": "50", "y2": "50"},
+                {"crop_id": "c1", "frame_id": "f1", "x1": "200", "y1": "200",
+                 "x2": "240", "y2": "240"},
+                {"crop_id": "c2", "frame_id": "f2", "x1": "900", "y1": "900",
+                 "x2": "940", "y2": "940"}]
+        n, refused = sync_reviewed(d, smap, {"c0": "chevron",     # renamed -> lands
+                                             "c1": "not_a_sign",  # SPECIAL -> refused
+                                             "c2": "chevron"})    # no overlap -> ignored
+        got = [r["label"] for r in P.rows(d / "reviewed.csv")]
+        assert n == 1, n
+        assert got == ["chevron", "information", "other_warning"], got
+        assert refused == {"c1": "not_a_sign"}, refused
+    print("ok")
 
 
 def save(d, smap, pred, done) -> None:
@@ -123,7 +249,10 @@ def main():
     ap.add_argument("bid")
     ap.add_argument("--only", help="only crops the VLM gave this class")
     ap.add_argument("--todo", action="store_true", help="skip already-confirmed crops")
+    ap.add_argument("--selfcheck", action="store_true", help=argparse.SUPPRESS)
     a = ap.parse_args()
+    if a.selfcheck:
+        return selfcheck()
     review(P.find(a.bid), a.only, a.todo)
 
 
