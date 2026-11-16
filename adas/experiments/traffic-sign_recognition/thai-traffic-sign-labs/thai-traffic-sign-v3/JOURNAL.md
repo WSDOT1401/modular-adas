@@ -941,9 +941,11 @@ a trend and having three unrelated numbers.
 
 - [ ] **Freeze M1's val split.** Three runs, three exams, no trend. Highest value
       item on this list.
-- [ ] `information` vs `not_a_sign` is now the live boundary, not bus stops. Look
-      at the 12 losses before adding more `not_a_sign` crops — if they are genuine
-      guide signs, the next batch makes this worse, not better.
+- [x] Tried moving the `information`/`not_a_sign` boundary with a sampler
+      weight. It moves, and the trade is bad — see below.
+- [ ] `information` vs `not_a_sign` is still the live boundary, and it is a
+      LABEL problem. Look at b02-2's 653 deletions (`review.py b02-2 --only
+      not_a_sign`) before adding more `not_a_sign` crops.
 - [ ] Footage, still: `keep_right` 0 clips, `right_curve` 3, `no_right_turn` 3,
       `t_junction_right` 2.
 - [ ] A stable headline. Best-of-N on a small-class macro still selects a lucky
@@ -952,3 +954,77 @@ a trend and having three unrelated numbers.
 - [ ] Pi: `run.py` has never been run on the Pi. No CPU timing exists. The AI HAT
       needs an x86 Linux host for the Dataflow Compiler; nothing is blocked on it
       for a demo, only speed.
+
+## 2026-11-16 (late) — `--reject-weight`: the knob works, the trade does not
+
+`not_a_sign` is 59% of M2's crop files after b02-2, and the obvious reaction is
+to cut it back. **That reaction is wrong, and the reason is worth writing down:
+`train_m2.py` has always used an inverse-frequency sampler**, so every class gets
+an equal share of each epoch no matter how many files it has. `not_a_sign` was
+3.6% of an epoch before b02-2 and 3.6% after. Capping the files would have
+changed nothing. What b02-2 actually changed is *variety* — the same 185 draws
+per epoch, now from a pool of 1766 instead of ~600.
+
+So the lever is the sampler weight, not the file count. Added `--reject-weight`
+(default 1.0, so every existing command is unchanged); 0.5 gives `not_a_sign`
+half of an equal share, 3.6% → 1.8% of an epoch.
+
+### The result, both checkpoints on the same 1151 crops
+
+| | all-class | macro@12 | quiet | `information` | `not_a_sign` | announced wrongly |
+|---|---|---|---|---|---|---|
+| **rw 1.0** | **83.7%** | 86.3% | **92.8%** | 117/137 | 467/569 | **65** |
+| rw 0.5 | 75.5% | 88.9% | 83.0% | **137/137** | 347/569 | 153 |
+
+`information` went perfect. All twenty losses came back. That is a clean
+confirmation of the diagnosis — the `information`/`not_a_sign` boundary is what
+b02-2 moved, and it is sharp enough that a sampler weight flips it.
+
+**And it is not worth having.** The last column is the one that decides it: the
+number of quiet-class crops the model hands to the driver as a sign went from 65
+to 153. Twenty recovered signs for eighty-eight extra false announcements. A
+missed sign is silence; a false one is the dash talking nonsense at someone who
+is driving. Reverted to `rw 1.0`; the 0.5 checkpoint is parked at
+`m2_classifier.rw05.pt`.
+
+The lesson is narrower than "don't reweight": a global weight moves *both*
+directions of a boundary. We only want to move the board-shaped part of it, and
+no scalar can express that. **It is a label problem.** The 653 boxes deleted in
+b02-2 are the training signal; if some of them are genuine guide signs, no knob
+fixes that and the next batch makes it worse.
+
+### The macro pointed the wrong way again
+
+macro@12 went **up** (86.3 → 88.9) while all-class fell 8.2 points and the
+driver-visible error rate more than doubled. That is the third time this metric
+has recommended the worse model. Six of twelve displayed classes have 5–13 val
+crops. **Do not use it to choose a checkpoint** — `train_m2.py` still saves
+best-by-macro, which is how this run shipped an epoch whose quiet rate is ten
+points below its own neighbours.
+
+### Two bugs in three lines, and the guard that should have existed first
+
+The first `--reject-weight 0.5` run reported *no change at all* — table identical
+to `rw 1.0` down to the last crop. It was not a finding. `ds.labels` holds class
+**indices**, and the weight line compared them to the string `"not_a_sign"`, so
+it never matched; training is seeded, so the run reproduced the previous
+checkpoint **bit for bit** (same sha256). The per-epoch curve looked plausibly
+different only because it was being eyeballed against `train_m2.log`, which is
+the older two-batch run on a different val set.
+
+That is the dangerous shape of bug: a no-op experiment that returns a clean,
+quotable, completely false negative. The sha256 was the only thing that caught
+it.
+
+The guard written in response was *also* wrong — it asserted the count of
+distinct sampler weights grew, but halving one class swaps one value for another
+and leaves the count alone, so it fired on a correct run. It now compares the
+weight list against the unweighted baseline:
+
+```python
+assert a.reject_weight == 1.0 or w != base, \
+    "--reject-weight had no effect on the sampler weights"
+```
+
+**Check that a flag changed something before spending fifteen minutes measuring
+what it changed.** Three minutes of arithmetic in a REPL would have caught both.

@@ -121,6 +121,12 @@ def main():
     ap.add_argument("--synth", type=int, default=2400, help="synthetic crops per epoch")
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--reject-weight", type=float, default=1.0,
+                    help="not_a_sign's share of an epoch, relative to every "
+                         "other class. 1.0 = equal (the sampler below already "
+                         "equalises, so the 59%% of crops that are not_a_sign "
+                         "is NOT what the model trains on). Below 1.0 trades "
+                         "rejection accuracy for `information` recall.")
     a = ap.parse_args()
 
     device = ("cuda" if torch.cuda.is_available() else
@@ -133,14 +139,24 @@ def main():
     # one epoch is 43% not_a_sign and 15% information, and the model can score
     # well on the micro number while never once saying `merge`.
     freq = collections.Counter(ds.labels)
-    sampler = WeightedRandomSampler([1.0 / freq[l] for l in ds.labels],
-                                    num_samples=len(ds), replacement=True)
+    # ds.labels holds class INDICES, not names. Comparing against the string
+    # here silently did nothing for one whole run -- the flag printed in the
+    # header, the weights never changed, and because training is seeded the
+    # result was bit-identical to the run it was meant to differ from.
+    reject = IDX["not_a_sign"]
+    base = [1.0 / freq[l] for l in ds.labels]
+    w = [b * (a.reject_weight if l == reject else 1.0)
+         for b, l in zip(base, ds.labels)]
+    assert a.reject_weight == 1.0 or w != base, \
+        "--reject-weight had no effect on the sampler weights"
+    sampler = WeightedRandomSampler(w, num_samples=len(ds), replacement=True)
     loader = DataLoader(ds, batch_size=a.batch, sampler=sampler, drop_last=True,
                         num_workers=a.workers, worker_init_fn=_seed_worker,
                         persistent_workers=a.workers > 0)
 
     print(f"{device}  {len(train)} real + {a.synth} synthetic per epoch, "
-          f"{len(val)} real val crops, {len(CLASSES)} classes at {SIZE}px")
+          f"{len(val)} real val crops, {len(CLASSES)} classes at {SIZE}px"
+          + (f", reject-weight {a.reject_weight}" if a.reject_weight != 1.0 else ""))
 
     model = mobilenet_v3_small(weights=MobileNet_V3_Small_Weights.DEFAULT)
     model.classifier[3] = nn.Linear(1024, len(CLASSES))     # swap the 1000-class head
