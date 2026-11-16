@@ -103,6 +103,15 @@ cp ../traffic-sign_recognition/speed_limit_classifier/speed_classifier.pt speed_
 shasum -a 256 *.pt          # compare against the table above
 ```
 
-`.pt` is gitignored repo-wide, so **these two files are not in version
-control** — a fresh clone gets this README and no weights. Retrain or copy them
-across by hand.
+`.pt` is gitignored repo-wide, but `adas/.gitignore` carries a negation for
+`central/**/*.pt`, so **these two files are in version control** — a fresh clone
+gets working weights. No LFS: a colleague without git-lfs would clone 130-byte
+pointer files that look like weights and fail at load time.
+
+## Also here
+
+- `sign_v3/` — the **v3** stack: M1 (class-agnostic detector) then M2 (29-class
+  crop classifier). Supersedes `b01.pt` for sign detection; `speed_reader.pt`
+  still has no v3 equivalent. See `sign_v3/README.md`.
+- `test-clip.mp4` — 2 min of 1080p dashcam, for `sign_v3/run.py`. 143 MB, **not
+  in git** (past GitHub's 100 MB file limit); `scp` it to the Pi.

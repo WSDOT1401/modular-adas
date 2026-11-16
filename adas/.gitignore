@@ -75,4 +75,8 @@ experiments/pi_recording/footage
 # far under GitHub's 100 MB per-file limit, so normal git carries them. NOT LFS:
 # a colleague without git-lfs would clone 130-byte pointer files that look like
 # weights and fail at load time, which is the exact problem this rule fixes.
-!experiments/central/*.pt
+!experiments/central/**/*.pt
+
+# The 2-minute 1080p test clip in central/ is NOT one of these. It is 143 MB,
+# past GitHub's 100 MB per-file limit, so it could not be pushed even if the
+# *.mp4 rule above let it. It travels to the Pi by scp, not by clone.
