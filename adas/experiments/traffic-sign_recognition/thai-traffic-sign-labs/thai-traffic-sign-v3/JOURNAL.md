@@ -858,3 +858,97 @@ This run's curve is also visibly flatter (last ten epochs span 84.9–87.7 again
 - [ ] Entropic Open-Set loss + OSCR, if M2 survives the presentation.
 - [ ] `--synth 2400` and the 0.7-1.0 RandomResizedCrop are still guesses that
       worked first time. Nobody has tried a second value.
+
+## 2026-11-16 (night) — b02-2 lands: M2 gets better overall and worse at the one class that matters
+
+759 new frames, 1068 crops, reviewed in one sitting. Both models retrained. The
+honest summary is that this batch bought a real improvement and charged for it in
+the most expensive currency available.
+
+### The dataset now
+
+| | frames | boxes |
+|---|---|---|
+| b01 | 880 | — |
+| b02-1 | 350 | — |
+| b02-2 | 759 | — |
+| **built** | **1989** (1561 train / 428 val) | 2104 |
+
+M2's crops: 2970 train / 1151 val across 29 classes. **`not_a_sign` is now 1766
+of the 2970 training crops — 59% of the dataset.** b02-2's review deleted 653 of
+its 1068 boxes, which is what picking at `conf 0.15` is *for*, but it moves the
+centre of gravity of what M2 is learning.
+
+### M2: +6.0 all-class, −8.8 on `information`
+
+Both checkpoints scored on the **same 1151 crops**, so for once this is a model
+comparison and not a model-and-exam comparison:
+
+| | all 1151 | macro@12 | quiet | `information` (137) | `not_a_sign` (569) |
+|---|---|---|---|---|---|
+| **new, 3 batches** | **83.7%** | 86.3% | 92.8% | 85.4% | 82.1% |
+| prev, 2 batches | 77.7% | 87.3% | 88.9% | 94.2% | 74.5% |
+
+Read it as one trade, not five numbers. The model got **better at rejecting**
+(`not_a_sign` 74.5 → 82.1, quiet 88.9 → 92.8) and that is almost all of the +6.0.
+It paid for it by rejecting things it should have named: **`information` fell from
+129/137 to 117/137, and all twelve losses went to `not_a_sign`.**
+
+That is the rule written into `classes.py` this morning, working, and then
+over-working. Billboards, shop fronts and bus-stop boards got deleted in review
+exactly as the rule says; `build_m2` harvested them as `not_a_sign` crops; M2
+learned the boundary harder. It now shaves real guide signs off the same edge.
+
+The direction is the safe one — the dash goes quiet instead of announcing the
+wrong thing — but a missed `information` is still a missed sign, and
+`information` is 54% of what this footage contains.
+
+The macro went *down* 1 point while all-class went *up* 6. That is the small-class
+macro doing what it always does; ignore it. **Quote 83.7%.**
+
+Note the headline is lower than yesterday's 90.3% and this is not a regression:
+the val set grew from 996 to 1151 crops and got harder. Yesterday's checkpoint
+scores **77.7%** on today's exam. Comparing 90.3 to 83.7 compares two exams.
+
+### M1: three runs, three different val sets
+
+`m1-floor16-b02-2`, yolo26n, imgsz 1280, `fliplr=0`, batch 8, AdamW lr0 1e-3,
+mosaic 0.5. Best epoch 18, early-stopped at 46 on patience 20.
+
+| run | P | R | mAP50 | mAP50-95 |
+|---|---|---|---|---|
+| floor16, b01 | 0.903 | 0.689 | 0.814 | 0.684 |
+| floor16, b01+b02-1 | 0.852 | 0.820 | 0.876 | 0.741 |
+| floor16, all three | 0.791 | 0.800 | 0.850 | 0.680 |
+
+Every number fell. **Do not read that as a worse model.** `prelabel.py build`
+re-splits by clip every time a batch lands, so all three rows were scored on
+different val sets — and unlike M2 above, no apples-to-apples rerun was done,
+because the old val clips may now be in the new train split and the comparison
+would be contaminated in the old model's favour.
+
+So: the M1 column of this table has been unreadable for three runs running. The
+fix is to freeze a val set — pick the clips once, never re-split them — and it is
+now the most valuable hour available, because it is the difference between having
+a trend and having three unrelated numbers.
+
+### Shipped
+
+`central/sign_v3/` updated to both new checkpoints (`m1.pt` `69a75ce304ad`,
+`m2.pt` `7efca804bb4f`), README numbers rewritten, `run.py --selfcheck` passes.
+
+### Open
+
+- [ ] **Freeze M1's val split.** Three runs, three exams, no trend. Highest value
+      item on this list.
+- [ ] `information` vs `not_a_sign` is now the live boundary, not bus stops. Look
+      at the 12 losses before adding more `not_a_sign` crops — if they are genuine
+      guide signs, the next batch makes this worse, not better.
+- [ ] Footage, still: `keep_right` 0 clips, `right_curve` 3, `no_right_turn` 3,
+      `t_junction_right` 2.
+- [ ] A stable headline. Best-of-N on a small-class macro still selects a lucky
+      epoch; all-class on 1151 crops is the number that holds still.
+- [ ] Entropic Open-Set loss + OSCR, if M2 survives the presentation.
+- [ ] Pi: `run.py` has never been run on the Pi. No CPU timing exists. The AI HAT
+      needs an x86 Linux host for the Dataflow Compiler; nothing is blocked on it
+      for a demo, only speed.
