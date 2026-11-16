@@ -12,6 +12,12 @@ off a dropdown while squinting at a sign 30 px wide.
 
 Crops arrive grouped by the VLM's guess, because a wrong one is obvious next to
 twenty right ones -- the same reason a contact sheet beats a spreadsheet.
+
+``x`` (not a sign) only reaches reviewed.csv under --only. Everywhere else the
+box belongs to CVAT, which showed a human the whole frame; filtered to one
+class you are answering "is this KIND of thing a sign?", and the frame adds
+nothing. Watch for the `!! NOT applied` line at the end -- a pass of 21 of them
+was silently lost once.
 """
 from __future__ import annotations
 
@@ -126,7 +132,8 @@ def review(d, only=None, todo=False) -> None:
     cv2.destroyAllWindows()
     save(d, smap, pred, done)
     print(f"{len(done)}/{len(queue)} confirmed -> {d/'confirmed.csv'}")
-    n, refused = sync_reviewed(d, [r for r in smap if r['crop_id'] in touched], pred)
+    n, refused = sync_reviewed(d, [r for r in smap if r['crop_id'] in touched],
+                               pred, allow_delete=bool(only))
     if (d / "reviewed.csv").exists():
         print(f"{n} name(s) carried into {d/'reviewed.csv'}")
         if refused:
@@ -213,7 +220,7 @@ def fill_crops(d, smap) -> list:
     return extra
 
 
-def sync_reviewed(d, smap, pred) -> int:
+def sync_reviewed(d, smap, pred, allow_delete=False) -> int:
     """Carry renames into reviewed.csv, which is what `prelabel.py build` reads.
 
     This file only exists after a CVAT pass, and renaming here afterwards used to
@@ -228,6 +235,15 @@ def sync_reviewed(d, smap, pred) -> int:
     on it. So those keystrokes are refused here -- but returned, not swallowed,
     because a refusal nobody is told about is the bug this function exists to fix.
 
+    ``allow_delete`` lets `not_a_sign` through, and review() sets it exactly when
+    --only is in use. The frame argument above is about ONE box: you cannot tell
+    from a 128 px crop whether that box belongs. Filtered to a single class you
+    are answering a different question -- "is this KIND of thing a sign?" -- and
+    the whole frame adds nothing to it. That is how the bus-stop boards were
+    settled on 2026-11-16, after a pass of 21 `x` keystrokes was refused and
+    silently lost. `dont_know` and the rest stay refused either way; only
+    `not_a_sign` is a class-wide answer.
+
     Returns (names written, {crop_id: refused label}).
     """
     rev, at = reviewed_rows(d, smap)
@@ -239,7 +255,7 @@ def sync_reviewed(d, smap, pred) -> int:
         i = at.get(r["crop_id"])
         if i is None or name not in P.IDX:
             continue
-        if name in P.SPECIAL:
+        if name in P.SPECIAL and not (allow_delete and name == "not_a_sign"):
             refused[r["crop_id"]] = name
             continue
         if rev[i]["label"] != name:
@@ -281,6 +297,14 @@ def selfcheck() -> None:
         assert n == 1, n
         assert got == ["chevron", "information", "other_warning"], got
         assert refused == {"c1": "not_a_sign"}, refused
+        # --only: the same keystroke now lands, because the question it answers
+        # is about the class, not about where this one box belongs.
+        n, refused = sync_reviewed(d, smap, {"c1": "not_a_sign"}, allow_delete=True)
+        assert (n, refused) == (1, {}), (n, refused)
+        assert [r["label"] for r in P.rows(d / "reviewed.csv")][1] == "not_a_sign"
+        # ...but the keystroke that drops a whole frame never does.
+        _n, refused = sync_reviewed(d, smap, {"c0": "dont_know"}, allow_delete=True)
+        assert refused == {"c0": "dont_know"}, refused
         # ...and that a reviewed box with no crop is noticed. No frames/ here,
         # so nothing is cut -- the queue drops rows whose crop is missing.
         assert [r["crop_id"] for r in fill_crops(d, smap[:2])] == ["f2_c0"]

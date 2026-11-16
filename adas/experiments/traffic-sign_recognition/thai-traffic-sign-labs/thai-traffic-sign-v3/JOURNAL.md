@@ -681,3 +681,180 @@ and lighting up the dash is not.
       right now it is whatever the reviewer felt that minute.
 - [ ] `--synth 2400` and the 0.7-1.0 RandomResizedCrop were guesses that worked
       first time. Nobody has tried a second value.
+
+## 2026-11-16 — A rule for `information`, a full human pass, and a number that was never real
+
+### Qwen is the wrong labeller for this footage, and the mix is why
+
+The note in `note.txt` said autolabel v2 was not efficient for distillation and
+the Qwen prompt needed rewriting. The prompt is not the problem.
+
+The golden experiment measured Qwen2.5-VL at 83.5% accuracy / 71.5% macro-recall
+(RESULTS.md section 7). Both numbers are carried by one class: that test set is
+54% `information` boards and Qwen reads them 201/202. Strip `information` and the
+rest scores 67%.
+
+b02-1 has the opposite mix. Its biggest class is `no_stopping_parking` at 144 of
+547 boxes — Qwen's **worst** class, 4/23 = 17%. `information` is only 16% here.
+Project the measured per-class recalls onto b02-1's actual counts:
+
+```
+388 boxes with a measured class  ->  58.4% right,  41.6% wrong
+all 547 boxes                    ->  41.4% right,  58.6% wrong
+```
+
+Two structural holes on top of the mix. 130 of 547 boxes are things the prompt
+never describes — 116 `not_a_sign`, 10 `no_pedestrians`, 2 `mandatory_direction`
+— and the prompt opens "This photo is a Thai road sign" with no way out. And 156
+of 496 crops never reached the model at all: `qwen_label.py` skips any crop with
+no coarse class, and M1 is class-agnostic by design.
+
+The raw b02-1 Qwen output no longer exists to score directly — `review.py`
+rewrites `predictions.csv` on every pass, and `.bak` already held CVAT
+corrections (`not_a_sign` and `dont_know` are review.py keystrokes, not Qwen
+vocabulary). The figures above are a projection built from measured parts, and
+they are labelled as such. **Keep the next batch's Colab download untouched** so
+the next prompt can be scored instead of estimated.
+
+### `prelabel.py from-m2`
+
+M2 scores 99.1% on `no_stopping_parking` and 88.5% over all 932 val crops. Once
+a class has training crops, the classifier is simply the better labeller, and it
+runs on the Mac in seconds instead of a Colab round trip. So `from-m2` replaces
+`from-colab` in the default path, and `detect` now says so.
+
+Smoke test on b02-1: 486 of 496 crops named in 3 seconds, 90.4% agreement with
+the human labels. That batch is in M2's training set, so it says the wiring
+works, not how good the model is.
+
+The confidence column rides along. Reviewing only the 15% of boxes below 0.80
+catches 54% of the errors.
+
+`from-m2` refuses to run on a batch with a `confirmed.csv` unless forced, because
+`predictions.csv` is also where `review.py` stores the human's answers — a
+re-run would quietly erase a day of labelling. It fired on the first real test.
+
+Qwen keeps one job: a class M2 has never seen. `keep_right` has zero crops
+anywhere, and a classifier cannot name what it was never trained on. That is the
+only distillation left.
+
+### The rule
+
+`information` had no written definition, so it was whatever the reviewer felt
+that minute, and the model had learned both answers. Of M2's `not_a_sign`
+mistakes, 10 went to `information` and 9 to `reserved_for_bus` — over half of
+them on one boundary.
+
+> `information` is a guide sign erected by the road authority: place names,
+> distances, direction arrows, lane diagrams. Everything else rectangular with
+> text on it is not a sign and its box is deleted — shop fronts, billboards,
+> posters, bus-stop boards.
+
+It lives in `classes.py` next to the class it governs. An appearance test cannot
+settle this, which is why having one was not enough: a billboard really is "a
+large board with text", and M2 calls one `information` at 0.94 for exactly that
+reason. The test has to be who erected it and whether it helps you drive. It
+matters because `information` is one of the 13 the dash SHOWS — label a bus
+shelter `information` and the screen speaks at every bus stop.
+
+### `reserved_for_bus` was never the sign it is named after
+
+All 19 crops in that class are bus-stop boards: blue arch, white bus, "BUS STOP"
+along the bottom. Not one is the blue regulatory bus-lane sign the name means.
+Eight identical boards had been deleted as `not_a_sign` in the same footage.
+
+So M2 naming the deleted ones `reserved_for_bus` at 0.98 was never a model error
+— it had learned exactly what it was taught, then was marked wrong for it. This
+was written up as "a definition question"; it was an inconsistency, which is a
+smaller and more fixable thing.
+
+All 21 boxes are now `not_a_sign`. The class name stays in `classes.py` with zero
+crops, like `keep_right`: deleting it would renumber `THAI_FINE_NAMES`, and that
+order is frozen. `cmd_build` drops a `not_a_sign` box and keeps the frame, so
+M1 learns bus stops are background, while `build_m2` harvests them as reject
+crops — M2 does not stop learning them, it learns to refuse them, which is what
+you want the moment M1 fires on one anyway.
+
+### A sweep, deleted the same day
+
+`sweep_labels.py` ran M2 over every human label and printed each crop it argued
+with. 36 arguments in 1729 boxes, 10 of them real errors — two overhead green
+guide boards deleted as not-signs, a real no-parking sign deleted, a height limit
+in `other_regulatory`, a chevron in `other_warning`, two `dont_know` crops that
+were plainly pedestrian crossings. The score did not move, and 26 of the 36 were
+the model being wrong.
+
+A model disagreeing with its own training labels mostly marks where it is
+undertrained. 178 lines for that is a bad trade, and it was deleted. What finds
+label problems here is rendering a class and looking at it — the wrong turn-sign
+artwork, the `no_left_turn` crops that were really no-parking, the bus stops.
+None of those came from a filter.
+
+`review.py --only <class>` already does exactly that, one crop at a time, and
+writes renames straight back. It did not need a new tool; it needed to be used.
+
+### 45 commands, 82 label corrections
+
+One `review.py <batch> --only <class>` per class per batch, smallest first. The
+pass moved 61 labels, and the big one was not subtle: **41 chevrons were still
+sitting in `other_warning`** in b01, which dropped 92 -> 47. Plus the 21 bus
+boards.
+
+No box was added or deleted, so M1 needed no retraining — it is class-agnostic,
+and renaming a box does not change its training data at all.
+
+### `x` was refused, 21 times, silently
+
+The bus-stop pass did nothing. `sync_reviewed` refuses every SPECIAL, including
+`not_a_sign`, on the grounds that only CVAT shows the whole frame. It prints a
+`!! NOT applied` line that is easy to miss after a long pass.
+
+That guard is about ONE box: you cannot tell from a 128 px crop whether that box
+belongs. Under `--only` you are answering a different question — "is this KIND of
+thing a sign?" — and the frame adds nothing to it. So `not_a_sign` now lands when
+`--only` is set, and nothing else does; `dont_know` still drops a whole frame and
+stays refused either way. Both halves are asserted in `review.py selfcheck`.
+
+### Where M2 stands, and which number to quote
+
+Both checkpoints on the same 996 val crops:
+
+| | macro (11 displayed) | quiet | all 996 crops |
+|---|---|---|---|
+| before the review pass | 87.5% | 95.5% | 876 = **88.0%** |
+| after | 87.7% | 94.3% | 899 = **90.3%** |
+
+The macro moved 0.2 points and the whole-dataset number moved 2.3. The label work
+is real; the headline metric cannot see it.
+
+| class | n | before | after |
+|---|---|---|---|
+| `information` | 154 | 96.8% | **100%** |
+| `stop` | 10 | 70.0% | 90.0% |
+| `no_left_turn` | 13 | 61.5% | 84.6% |
+| `right_curve` | 5 | 60.0% | 100% |
+| `keep_left` | 5 | 100% | 60.0% |
+| `no_right_u_turn` | 5 | 100% | 80.0% |
+| `turn_right` | 9 | 100% | 88.9% |
+
+Six of the eleven scored classes have 5–13 val crops, so one crop is 8–20 points.
+Every swing above except `information` is one to three crops.
+
+**93.6% was never real.** `train_m2.py` saves the best of 30 epochs, and that run
+spiked to 93.6 at epoch 20 with 91 and 86 either side. Both earlier runs plateau
+at 88–89. It was quoted several times, including in this journal, and it is
+withdrawn: **quote 90.3% over all 996 val crops, and `information` 100% on 154.**
+This run's curve is also visibly flatter (last ten epochs span 84.9–87.7 against
+86–93.6 before), which is what cleaner labels should look like.
+
+### Open
+
+- [x] Bus-stop boards. Settled: `not_a_sign`, by a written rule.
+- [ ] Footage, still: `keep_right` 0 clips, `right_curve` 3, `no_right_turn` 3,
+      `t_junction_right` 2. Six displayed classes have 5 or fewer val crops, which
+      is what makes the macro unquotable. This is a filming problem.
+- [ ] A stable headline. Best-of-30 on a macro over small classes selects a lucky
+      epoch. Report the plateau, or score on something bigger than 5 crops.
+- [ ] Entropic Open-Set loss + OSCR, if M2 survives the presentation.
+- [ ] `--synth 2400` and the 0.7-1.0 RandomResizedCrop are still guesses that
+      worked first time. Nobody has tried a second value.
