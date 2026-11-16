@@ -9,7 +9,10 @@ monitor you name, with the last two minutes as a graph:
   AI HAT   load (its fps against the most it does), fps, time per frame,
            chip temperature
   Pi       CPU (all cores and each core), memory, SoC temperature, the vision
-           service's frame rate
+           service's frame rate, and its power: the 5 V coming in, the watts
+           it draws, and whether the supply has sagged (under-voltage). Power
+           is read here, not by the vision service, so it shows with no model
+           running.
 
 On the Pi, next to the ADAS display on the round screen:
 
@@ -25,6 +28,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import shutil
+import subprocess
 import sys
 import time
 from collections import deque
@@ -39,6 +45,56 @@ BG, PANEL, TRACK = "#050607", "#0A0D10", "#161B20"
 TEXT, DIM, FAINT = "#F2F4F5", "#8B949C", "#2A3138"
 INFO, CAUTION, WARNING, ACTIVE = "#7CC4FF", "#FFB020", "#FF4D3D", "#4FD08A"
 FONT = "DejaVu Sans"
+
+
+# ---- power ---------------------------------------------------------------------
+# vcgencmd get_throttled bits. The Pi 5 wants 5.1 V; below about 4.8 V it
+# flags under-voltage and slows itself down.
+UNDERVOLT_NOW, UNDERVOLT_SEEN = 1 << 0, 1 << 16
+LOW_V = 4.85
+
+
+def parse_pmic(text: str) -> "tuple[float | None, float | None]":
+    """``vcgencmd pmic_read_adc`` -> (input volts, watts). The watts are each
+    rail's current times its voltage, summed: the Pi's own circuits only, so
+    the screens and USB devices draw more on top."""
+    amps, volts = {}, {}
+    for name, kind, value in re.findall(r"(\S+)_([AV]) \w+\(\d+\)=([\d.]+)", text):
+        (amps if kind == "A" else volts)[name] = float(value)
+    watts = sum(a * volts[n] for n, a in amps.items() if n in volts) if amps else None
+    return volts.get("EXT5V"), watts
+
+
+def power() -> "dict | None":
+    """Input volts, watts and the throttle flags; None off a Pi."""
+    if not shutil.which("vcgencmd"):
+        return None
+    try:
+        pmic = subprocess.run(["vcgencmd", "pmic_read_adc"], capture_output=True,
+                              text=True, timeout=2).stdout
+        thr = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
+                             text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    volts, watts = parse_pmic(pmic)
+    m = re.search(r"0x([0-9a-fA-F]+)", thr)
+    return {"volts": volts, "watts": watts, "flags": int(m.group(1), 16) if m else 0}
+
+
+def supply_text(p: "dict | None") -> "tuple[str, str]":
+    """The supply reading and its colour: red while it sags, amber once it has."""
+    if p is None or p.get("volts") is None:
+        return "--", DIM
+    v, flags = p["volts"], p.get("flags") or 0
+    if flags & UNDERVOLT_NOW:
+        return f"{v:.2f} V  too low now", WARNING
+    if flags & UNDERVOLT_SEEN:
+        return f"{v:.2f} V  dipped since boot", CAUTION
+    return f"{v:.2f} V", CAUTION if v < LOW_V else TEXT
+
+
+def watts_text(p: "dict | None") -> str:
+    return "--" if p is None or p.get("watts") is None else f"{p['watts']:.1f} W"
 
 
 def read() -> "dict | None":
@@ -87,6 +143,12 @@ def text_view(s: "dict | None") -> str:
     return "\n".join(out) + "\n"
 
 
+def power_line(p: "dict | None") -> str:
+    if p is None:
+        return "Power   -- (no vcgencmd: not a Pi)\n"
+    return f"Power   in {supply_text(p)[0]}   Pi draws {watts_text(p)}\n"
+
+
 # ---- window --------------------------------------------------------------------
 class StatsWindow:
     def __init__(self, root, fullscreen: bool) -> None:
@@ -107,12 +169,14 @@ class StatsWindow:
             root.bind(key, lambda _e: root.destroy())
         root.bind("<Configure>", lambda _e: self.draw())
         self.stats: "dict | None" = None
+        self.power: "dict | None" = None
         self.hat = deque([None] * HISTORY, maxlen=HISTORY)
         self.cpu = deque([None] * HISTORY, maxlen=HISTORY)
         self.tick()
 
     def tick(self) -> None:
         self.stats = read()
+        self.power = power()
         s = self.stats or {}
         self.hat.append(s.get("hat_load"))
         self.cpu.append(s.get("cpu_load"))
@@ -227,6 +291,8 @@ class StatsWindow:
              temp_colour(s.get("cpu_temp_c"))),
             ("Vision service", f"{s.get('fps', 0):.1f} frames/s" if self.stats else "not running",
              TEXT if self.stats else CAUTION),
+            ("Supply in", *supply_text(self.power)),
+            ("Pi draws", watts_text(self.power), TEXT),
         ])
         self.graph(ix, ry + 12 * u, iw, y + ph - ry - 60 * u, self.cpu, INFO)
 
@@ -239,7 +305,8 @@ def main() -> int:
     if args.text:
         try:
             while True:
-                sys.stdout.write("\033[H\033[J" + text_view(read()) + "\nCtrl+C to quit\n")
+                sys.stdout.write("\033[H\033[J" + text_view(read()) + power_line(power())
+                                 + "\nCtrl+C to quit\n")
                 sys.stdout.flush()
                 time.sleep(1.0)
         except KeyboardInterrupt:
