@@ -34,6 +34,7 @@ class SignPipeline:
         self._vote = vote
         self._tracker = tracker or SignTracker()
         self._pending: deque = deque()
+        self.frame = None                # the frame the last detections were found in
 
     @property
     def detector(self):
@@ -53,6 +54,7 @@ class SignPipeline:
             frame, raw = done
         else:
             raw = self._detector.detect(frame)
+        self.frame = frame
         detections = [d for d in raw if publishable(d["name"])]
         out: dict = {}
 

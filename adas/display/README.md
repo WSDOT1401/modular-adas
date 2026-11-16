@@ -180,9 +180,13 @@ with two, the one that isn't primary: a round panel without EDID comes up as
 ./build/adas_display --screen HDMI-A-2
 ```
 
-Run it through X11 (`QT_QPA_PLATFORM=xcb DISPLAY=:0`, as the service does).
-On Wayland the desktop (labwc) decides which monitor a full-screen window
-lands on, and with two monitors it isn't always the one asked for.
+Run it as a Wayland window (`QT_QPA_PLATFORM=wayland`, as the service does),
+not through X11 (`xcb`): every X11 window on the Pi goes through one X
+server, XWayland, and when another one is busy there (the stats window's
+video) the display waits its turn, down to ~10 frames a second. As a Wayland
+window it draws at the screen's 60 Hz with the models running. labwc first
+puts a new window wherever it likes; the display moves itself to the chosen
+monitor as it goes full screen.
 
 ### Start at boot
 
@@ -209,7 +213,7 @@ to it:
 
 ```bash
 systemctl --user stop adas-display
-QT_QPA_PLATFORM=xcb DISPLAY=:0 \
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 \
   ~/modular-adas/adas/display/build/adas_display --screen auto --vision-host <laptop-ip>
 ```
 

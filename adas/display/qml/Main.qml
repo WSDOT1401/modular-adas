@@ -16,8 +16,9 @@ Window {
     // The monitor chosen by --screen (main.cpp). The desktop (labwc) makes a
     // window full screen on whichever monitor it first appears on, whatever
     // `screen` says, so the window opens inside that monitor first and goes
-    // full screen once it's there. Placing it needs X11 (QT_QPA_PLATFORM=xcb):
-    // a Wayland client can't choose where its window goes.
+    // full screen once it's there. On Wayland, where labwc puts a new window
+    // wherever it likes, it asks for full screen on that monitor (the Timer
+    // under start-up).
     readonly property var startScreen: Qt.application.screens[startupScreen]
     screen: startScreen
     x: startScreen.virtualX + Math.max(0, (startScreen.width - width) / 2)
@@ -130,7 +131,12 @@ Window {
     Timer {
         running: startFullScreen
         interval: 300
-        onTriggered: win.visibility = Window.FullScreen
+        onTriggered: {
+            // On Wayland the window first lands where the desktop puts it, and
+            // full screen goes to the screen it is on: put it back on ours.
+            win.screen = startScreen
+            win.visibility = Window.FullScreen
+        }
     }
 
     Component.onCompleted: {

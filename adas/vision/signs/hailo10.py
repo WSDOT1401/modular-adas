@@ -23,6 +23,7 @@ screen (tools/stats_window.py).
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections import deque
@@ -40,14 +41,41 @@ _MAX_DET = 300
 # the AI HAT+ 2): the "100%" of the load figure.
 _MAX_FPS = {1: 18.0, 2: 35.0, 3: 51.0, 4: 59.0}
 
+# One VDevice per process: HailoRT won't open the chip twice, so every model
+# here (sign_v3's M1 and M2) shares it, and the scheduler takes turns.
+_vdevice = None
+_vdevice_users = 0
+
+
+def _open_vdevice():
+    global _vdevice, _vdevice_users
+    if _vdevice is None:
+        from hailo_platform import HailoSchedulingAlgorithm, VDevice  # type: ignore
+
+        # For `hailortcli monitor`, once a HailoRT that supports it on the
+        # Hailo-10H is installed (5.1.1 doesn't). Must be set before the VDevice.
+        os.environ.setdefault("HAILO_MONITOR", "1")
+        params = VDevice.create_params()
+        params.scheduling_algorithm = HailoSchedulingAlgorithm.ROUND_ROBIN
+        _vdevice = VDevice(params)
+    _vdevice_users += 1
+    return _vdevice
+
+
+def _close_vdevice() -> None:
+    global _vdevice, _vdevice_users
+    _vdevice_users -= 1
+    if _vdevice_users == 0 and _vdevice is not None:
+        _vdevice.release()
+        _vdevice = None
+
 
 class HailoSignDetector:
     on_hailo = True
 
     def __init__(self, folder: str, conf: float = 0.4, depth: int = 3) -> None:
         import yaml  # type: ignore
-        from hailo_platform import (HEF, FormatType, HailoSchedulingAlgorithm,  # type: ignore
-                                    VDevice)
+        from hailo_platform import HEF, FormatType  # type: ignore
 
         hef_file = next(Path(folder).glob("*.hef"), None)
         if hef_file is None:
@@ -57,9 +85,6 @@ class HailoSignDetector:
         self._conf = conf
         self._logit = float(np.log(conf / (1 - conf)))   # sigmoid(x) > conf  <=>  x > logit
 
-        # For `hailortcli monitor`, once a HailoRT that supports it on the
-        # Hailo-10H is installed (5.1.1 doesn't). Must be set before the VDevice.
-        os.environ.setdefault("HAILO_MONITOR", "1")
         self._hef_name = hef_file.name
         hef = HEF(str(hef_file))
         self._size = hef.get_input_vstream_infos()[0].shape[0]       # 1280 (square)
@@ -67,9 +92,7 @@ class HailoSignDetector:
         half = len(order) // 2
         self._box_names, self._cls_names = order[:half], order[half:]
 
-        params = VDevice.create_params()
-        params.scheduling_algorithm = HailoSchedulingAlgorithm.ROUND_ROBIN
-        self._device = VDevice(params)
+        self._device = _open_vdevice()
         model = self._device.create_infer_model(str(hef_file))
         model.set_batch_size(1)
         model.input().set_format_type(FormatType.UINT8)
@@ -200,4 +223,47 @@ class HailoSignDetector:
         while self._inflight:
             self._inflight.popleft()[0].wait(_TIMEOUT_MS)
         self._configured.__exit__(None, None, None)
-        self._device.release()
+        _close_vdevice()
+
+
+class HailoCropClassifier:
+    """sign_v3's M2 on the AI HAT: square RGB crops in, (class, confidence)
+    out. The folder is tools/export_m2_hailo.py's: m2.hef, with the
+    ImageNet normalisation compiled in, and m2.json (classes, the ones the
+    dash shows, crop size)."""
+
+    on_hailo = True
+
+    def __init__(self, folder: str) -> None:
+        from hailo_platform import FormatType  # type: ignore
+
+        folder_path = Path(folder)
+        meta = json.loads((folder_path / "m2.json").read_text())
+        self.classes: List[str] = meta["classes"]
+        self.displayed = set(meta["displayed"])
+        self.size = int(meta["size"])
+        self._device = _open_vdevice()
+        model = self._device.create_infer_model(str(folder_path / "m2.hef"))
+        model.set_batch_size(1)
+        model.input().set_format_type(FormatType.UINT8)
+        model.output().set_format_type(FormatType.FLOAT32)
+        self._configured = model.configure()
+        self._configured.__enter__()
+        self._bindings = self._configured.create_bindings(
+            output_buffers={model.output().name: np.empty(model.output().shape, dtype=np.float32)})
+
+    def classify(self, crops: "List[np.ndarray]") -> "List[Tuple[str, float]]":
+        out = []
+        for crop in crops:
+            # HailoRT wants a writeable buffer; a crop straight from PIL is read-only.
+            self._bindings.input().set_buffer(np.require(crop, np.uint8, ["C", "W"]))
+            self._configured.run([self._bindings], _TIMEOUT_MS)
+            logits = self._bindings.output().get_buffer().reshape(-1)
+            p = np.exp(logits - logits.max())
+            j = int(p.argmax())
+            out.append((self.classes[j], float(p[j] / p.sum())))
+        return out
+
+    def close(self) -> None:
+        self._configured.__exit__(None, None, None)
+        _close_vdevice()

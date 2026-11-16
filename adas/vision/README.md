@@ -33,7 +33,8 @@ lane/
   departure.py           offset -> warning state + direction (hysteresis) ← real, tested
 signs/
   detector.py            b01 YOLO: frame -> sign boxes + Thai class names
-  hailo10.py             the same on the AI HAT+ 2, 3 frames in flight (+ HAT stats)
+  hailo10.py             the same on the AI HAT+ 2, 3 frames in flight (+ HAT stats); M2 there
+  v3.py                  sign_v3: M1 finds a sign, M2 names its 128 px crop (the default)
   tracker.py             one event per physical sign, not one per frame
   speed.py               loads the speed reader (classify.py) and its vote
   pipeline.py            detections -> sign_seen / speed_limit keys
@@ -46,7 +47,8 @@ runtime/
 tools/
   bench.py               a clip as the camera: vision + speed sim + display, one command
   stats_window.py        AI HAT and Pi load on a monitor of its own (btop can't see the HAT)
-  export_hailo.py        compile b01 for the AI HAT (in WSL / Linux x86_64)
+  export_hailo.py        compile a YOLO (b01, sign_v3's M1) for the AI HAT (in WSL / Linux x86_64)
+  export_m2_hailo.py     compile sign_v3's M2 classifier for the AI HAT (same place)
   mock_lane_writer.py    synthetic warnings over UDP (works, no camera)
   calibrate.py           interactive ROI/warp calibration               (TODO)
   record_clip.py         record a clip into tests/fixtures/             (TODO)
@@ -136,9 +138,35 @@ memory and SoC temperature) to `/dev/shm/adas-stats.json` once a second, and
 on the other monitor. They never go to the driver's display.
 
 ```bash
-DISPLAY=:0 python3 tools/stats_window.py     # full screen on HDMI-A-1
+python3 tools/stats_window.py               # full screen beside the round screen
 python3 tools/stats_window.py --text          # in a terminal, e.g. over ssh
 ```
+
+### Room for the display
+
+The driver's display has to stay smooth with the models running. Measured on
+the Pi 5 with the sign_v3 models replaying a clip (~27 fps) and the stats
+window showing the video, the display's animations ran at:
+
+| | animations |
+|---|---|
+| display alone | 50-60 fps |
+| before: display and stats window through X11 | 17-20 fps |
+| now: both Wayland windows, vision off core 3 | 51-64 fps, no frame over 33 ms |
+
+What held it up wasn't the CPU but the X server: an X11 window on the Pi's
+desktop goes through XWayland, and the stats window's video kept XWayland
+busy, so the display, an X11 window too, waited for it to show each frame.
+Both are Wayland windows now: the display (`QT_QPA_PLATFORM=wayland`,
+adas/display) and the stats window (GTK 3, not Tk, which only does X11).
+
+The vision service, and the stats window, also keep off core 3 and run at
+nice 10 (`runtime/priority.py`, `config.DISPLAY_CORES` and `VISION_NICE`), so
+the display and the desktop always find a free core: it halved the time the
+display waits for one, for 26.1 -> 25.8 fps of vision. The service prints
+what it did when it starts (`vision: cores 0,1,2, nice 10`); `main.py
+--all-cores` turns it off, and so does a display on another machine
+(`--display`).
 
 ## Test
 

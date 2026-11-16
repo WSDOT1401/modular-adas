@@ -77,6 +77,26 @@ SIGN_CONFIRM_FRAMES = 3
 SIGN_GAP_FRAMES = 12
 SIGN_REPEAT_S = 20.0
 
+# --- sign_v3 (central/sign_v3): M1 finds the sign, M2 names it -------------------
+# The default whenever its m1.pt is there; main.py --signs b01 for the old
+# single model. Each model runs on the AI HAT once compiled
+# (tools/export_hailo.py for M1, tools/export_m2_hailo.py for M2) and the
+# Hailo runtime is installed; otherwise through PyTorch.
+_V3 = _ADAS / "experiments/central/sign_v3"
+SIGN_STACK = "v3" if (_V3 / "m1.pt").is_file() else "b01"       # "v3" | "b01"
+
+
+def _v3(name: str) -> str:
+    hailo = _V3 / f"{name}_hailo_model"
+    return str(hailo if hailo.is_dir() and _HAS_HAILO else _V3 / f"{name}.pt")
+
+
+V3_M1 = _v3("m1")
+V3_M2 = _v3("m2")
+# M1 only says "a sign is here"; M2 (with its not_a_sign class) throws out
+# the mistakes, so M1 runs at run.py's low threshold.
+V3_M1_CONF = 0.25
+
 # --- Output (shared UDP contract) ------------------------------------------
 # None: adas_protocol's default, 127.0.0.1:9100, or ADAS_UDP_TARGETS if set.
 UDP_HOST = None
@@ -87,3 +107,16 @@ CONTROL_PORT = None
 # Interface the control port listens on: this machine only, unless the
 # display is on another one (main.py --display sets "0.0.0.0").
 CONTROL_BIND = "127.0.0.1"
+
+# --- Sharing the Pi with the display (runtime/priority.py) -------------------
+# The driver's display must stay smooth while the models run: the vision
+# service and the stats window keep off these cores, which the display, the
+# desktop and X then always find free, and run this much lower in priority
+# (nice; 0-19, higher = yields more). main.py --all-cores turns it off.
+DISPLAY_CORES = (3,)           # the Pi 5's last core; core 0 also takes most interrupts
+VISION_NICE = 10
+
+# --- Stats screen (tools/stats_window.py, never the driver's display) -------
+# The frame with its boxes goes to the stats window this many times a second,
+# and only while it is open.
+PREVIEW_FPS = 15

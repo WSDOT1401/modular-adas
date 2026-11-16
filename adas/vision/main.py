@@ -30,6 +30,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="ADAS vision service")
     ap.add_argument("--source", choices=["camera", "file"], default=config.SOURCE)
     ap.add_argument("--clip", default=None, help="dashcam clip for --source file")
+    ap.add_argument("--signs", choices=("v3", "b01"), default=config.SIGN_STACK,
+                    help="sign models: v3 = central/sign_v3 (M1 + M2, the default when it's "
+                         "there), b01 = the single b01 detector")
     ap.add_argument("--weights", default=None, help="sign detector weights (b01.pt)")
     ap.add_argument("--reader", default=None, help="speed reader weights (speed_reader.pt)")
     ap.add_argument("--device", default=None, help='inference device: "cpu", "0" (CUDA), "mps"')
@@ -43,9 +46,19 @@ def main() -> int:
     ap.add_argument("--display", metavar="HOST", default=None,
                     help="send to a display on another machine (e.g. the Pi's IP), "
                          "and take its feature switches from the network")
+    ap.add_argument("--all-cores", action="store_true",
+                    help="don't keep a core free for the display (config.DISPLAY_CORES)")
     args = ap.parse_args()
 
+    # Before anything starts a thread or loads OpenCV/PyTorch (runtime/priority.py).
+    # A display on another machine needs nothing kept free here.
+    if not (args.all_cores or args.display):
+        from runtime.priority import yield_to_display
+        print(f"vision: {yield_to_display(config.DISPLAY_CORES, config.VISION_NICE)}"
+              " (the rest left to the display)", flush=True)
+
     config.SOURCE = args.source
+    config.SIGN_STACK = args.signs
     config.FRAME_WIDTH, config.FRAME_HEIGHT, config.TARGET_FPS = config.CAMERA_MODES[args.camera]
     if args.clip:
         config.CLIP_PATH = args.clip

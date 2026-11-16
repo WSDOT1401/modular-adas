@@ -83,9 +83,25 @@ def main() -> int:
                     help="where the compiled model folder goes")
     ap.add_argument("--work", default=str(Path.home() / "hailo-calib"),
                     help="where the calibration frames go (reused on a rerun)")
+    ap.add_argument("--finetune-batch", type=int, default=2,
+                    help="quantisation-aware fine-tuning batch. The DFC's default (8) runs out "
+                         "of memory on an 8 GB laptop GPU at 1280 px; it scales the learning "
+                         "rate to the batch itself")
     args = ap.parse_args()
 
+    from hailo_sdk_client import ClientRunner  # type: ignore
     from ultralytics import YOLO  # type: ignore
+
+    # Ultralytics writes the model script itself; slip the batch size into its
+    # fine-tune line (it runs on the CPU too, just much slower).
+    load = ClientRunner.load_model_script
+
+    def load_model_script(self, script, *a, **k):
+        script = script.replace("post_quantization_optimization(finetune, policy=enabled,",
+                                "post_quantization_optimization(finetune, policy=enabled, "
+                                f"batch_size={args.finetune_batch},")
+        return load(self, script, *a, **k)
+    ClientRunner.load_model_script = load_model_script
 
     model = YOLO(args.weights)
     yaml = build_calibration(args.clip, Path(args.work), args.frames, model.names)

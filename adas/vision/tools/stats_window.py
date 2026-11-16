@@ -13,22 +13,30 @@ monitor you name, with the last two minutes as a graph:
            it draws, and whether the supply has sagged (under-voltage). Power
            is read here, not by the vision service, so it shows with no model
            running.
+  Video    what the vision service sees, with its boxes, beside the figures
+           (runtime/preview.py). The window asks for it, in the size it
+           wants, so a Pi with no stats screen never makes it.
 
 On the Pi, next to the ADAS display on the round screen:
 
-    python3 tools/stats_window.py                 # full screen on HDMI-A-1
+    python3 tools/stats_window.py                 # full screen beside the round screen
     python3 tools/stats_window.py --windowed      # a window instead
     python3 tools/stats_window.py --text          # in the terminal (ssh)
 
 Peaks (watts, temperatures, the supply's high and low) run from when the
-window opened; r resets them. q or Esc closes it. Plain Python with Tk, no packages: it doesn't need the
-venv. The AI HAT's load is worked out from its frame rate: HailoRT 5.1.1
-gives no reading from inside the Hailo-10H.
+window opened; r resets them. q or Esc closes it. Plain Python with GTK 3
+(python3-gi, part of the Raspberry Pi OS desktop): it doesn't need the venv.
+GTK, not Tk, because a GTK window is a Wayland one: a Tk window goes through
+XWayland, and the video drawn there held the driver's display up to ~10
+frames a second (vision README, "Room for the display"). The AI HAT's load is
+worked out from its frame rate: HailoRT 5.1.1 gives no reading from inside
+the Hailo-10H.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -38,6 +46,9 @@ from collections import deque
 from pathlib import Path
 
 STATS_FILE = Path("/dev/shm/adas-stats.json")     # runtime/health.py writes it
+FRAME_FILE = Path("/dev/shm/adas-frame.ppm")      # runtime/preview.py writes it
+WANT_FILE = Path("/dev/shm/adas-frame.want")      # ... at the size asked for here
+FRAME_MS = 66                                      # look for a new frame ~15 times a second
 STALE_S = 3.0
 HISTORY = 120                                      # seconds on the graphs
 
@@ -210,35 +221,70 @@ def power_line(p: "dict | None", soc: "float | None", pk: Peaks) -> str:
 
 
 # ---- window --------------------------------------------------------------------
-class StatsWindow:
-    def __init__(self, root, fullscreen: bool) -> None:
-        import tkinter as tk
+Gdk = GdkPixbuf = GLib = Gtk = Pango = PangoCairo = None     # GTK, loaded by StatsWindow
 
-        self.root = root
-        root.title("ADAS stats")
-        root.configure(bg=BG)
-        if fullscreen:
-            # HDMI-A-1 starts at 0,0 (the round screen is beside it). Full screen
-            # only takes once the window is up: asked for before, it's ignored.
-            root.geometry("+0+0")
-            root.after(300, lambda: root.attributes("-fullscreen", True))
-            root.config(cursor="none")
-        self.c = tk.Canvas(root, bg=BG, highlightthickness=0)
-        self.c.pack(fill="both", expand=True)
-        for key in ("<Escape>", "q", "Q"):
-            root.bind(key, lambda _e: root.destroy())
-        for key in ("r", "R"):
-            root.bind(key, lambda _e: (self.peaks.reset(), self.draw()))
-        root.bind("<Configure>", lambda _e: self.draw())
+
+def rgb(colour: str) -> "tuple[float, float, float]":
+    return tuple(int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+
+
+class StatsWindow:
+    """The stats, drawn with cairo in a GTK 3 window (a Wayland one)."""
+
+    def __init__(self, fullscreen: bool) -> None:
+        global Gdk, GdkPixbuf, GLib, Gtk, Pango, PangoCairo
+        import gi  # type: ignore
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        gi.require_version("PangoCairo", "1.0")
+        from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango, PangoCairo  # type: ignore
+
         self.stats: "dict | None" = None
         self.power: "dict | None" = None
         self.soc: "float | None" = None
         self.peaks = Peaks()
         self.hat = deque([None] * HISTORY, maxlen=HISTORY)
         self.cpu = deque([None] * HISTORY, maxlen=HISTORY)
-        self.tick()
+        self.u = 1.0
+        self.ph = 0.0
+        self.cr = None
+        self.fonts: dict = {}
+        self.video_size: "tuple[int, int] | None" = None   # what we ask the vision service for
+        self.video_at: "tuple[int, int, int, int] | None" = None   # x, y, w, h in the window
+        self.frame_mtime = 0.0
+        self.has_video = False
+        self.pixbuf = None
 
-    def tick(self) -> None:
+        self.win = win = Gtk.Window(title="ADAS stats")
+        self.area = Gtk.DrawingArea()
+        self.area.connect("draw", self.on_draw)
+        win.add(self.area)
+        win.connect("destroy", Gtk.main_quit)
+        win.connect("key-press-event", self.on_key)
+        win.set_default_size(1600, 900)
+        win.show_all()
+        if fullscreen:
+            win.get_window().set_cursor(Gdk.Cursor.new_from_name(win.get_display(), "none"))
+            # Beside the round screen: on the monitor that isn't square.
+            disp = win.get_display()
+            shapes = [disp.get_monitor(i).get_geometry() for i in range(disp.get_n_monitors())]
+            pick = next((i for i, g in enumerate(shapes) if g.width != g.height), 0)
+            win.fullscreen_on_monitor(win.get_screen(), pick)
+        self.tick()
+        GLib.timeout_add(1000, self.tick)
+        GLib.timeout_add(FRAME_MS, self.frame_tick)
+
+    def on_key(self, _win, event) -> bool:
+        key = Gdk.keyval_name(event.keyval)
+        if key in ("Escape", "q", "Q"):
+            Gtk.main_quit()
+        elif key in ("r", "R"):
+            self.peaks.reset()
+            self.area.queue_draw()
+        return True
+
+    def tick(self) -> bool:
         self.stats = read()
         self.power = power()
         self.soc = soc_temp()
@@ -248,132 +294,284 @@ class StatsWindow:
         s = self.stats or {}
         self.hat.append(s.get("hat_load"))
         self.cpu.append(s.get("cpu_load"))
-        self.draw()
-        self.root.after(1000, self.tick)
+        self.ask_for_video()
+        self.has_video = self.fresh_frame() is not None
+        self.area.queue_draw()
+        return True
+
+    # -- the video --
+    def ask_for_video(self) -> None:
+        """Tell the vision service we're watching, and at what size. Every second:
+        a stale request means no one is, and it stops making frames."""
+        if self.video_size is None:
+            return
+        try:
+            WANT_FILE.write_text("%d %d\n" % self.video_size)
+        except OSError:
+            pass
+
+    @staticmethod
+    def fresh_frame() -> "float | None":
+        try:
+            mtime = FRAME_FILE.stat().st_mtime
+        except OSError:
+            return None
+        return mtime if time.time() - mtime < STALE_S else None
+
+    def frame_tick(self) -> bool:
+        mtime = self.fresh_frame()
+        if (mtime is not None) != self.has_video:           # the feed came or went: relayout
+            self.has_video = mtime is not None
+            self.area.queue_draw()
+        if mtime is not None and mtime != self.frame_mtime:
+            self.frame_mtime = mtime
+            try:
+                self.pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(FRAME_FILE))
+            except GLib.Error:                                # replaced mid-read: take the next
+                return True
+            if self.video_at and self.has_video:
+                self.area.queue_draw_area(*self.video_at)     # only the video: the rest stands
+        return True
+
+    def paint_video(self) -> None:
+        x, y, w, h = self.video_at
+        cr = self.cr
+        cr.set_source_rgb(0, 0, 0)
+        cr.rectangle(x, y, w, h)
+        cr.fill()
+        if self.pixbuf is not None:
+            pw, ph = self.pixbuf.get_width(), self.pixbuf.get_height()
+            px, py = round(x + (w - pw) / 2), round(y + (h - ph) / 2)
+            Gdk.cairo_set_source_pixbuf(cr, self.pixbuf, px, py)
+            cr.rectangle(px, py, min(pw, w), min(ph, h))
+            cr.fill()
 
     # -- drawing helpers (u = one design pixel at 1600x900) --
-    def font(self, px: float, bold: bool = False):
-        return (FONT, -max(8, round(px * self.u)), "bold" if bold else "normal")
-
     def text(self, x, y, s, px, colour=TEXT, anchor="nw", bold=False):
-        self.c.create_text(x, y, text=s, fill=colour, font=self.font(px, bold), anchor=anchor)
+        size = max(8, round(px * self.u))
+        font = self.fonts.get((size, bold))
+        if font is None:
+            font = self.fonts[(size, bold)] = Pango.FontDescription(FONT + (" Bold" if bold else ""))
+            font.set_absolute_size(size * Pango.SCALE)
+        layout = PangoCairo.create_layout(self.cr)
+        layout.set_font_description(font)
+        layout.set_text(s, -1)
+        _ink, box = layout.get_pixel_extents()
+        if "e" in anchor:
+            x -= box.width
+        if "s" in anchor:
+            y -= box.height
+        self.cr.set_source_rgb(*rgb(colour))
+        self.cr.move_to(x, y)
+        PangoCairo.show_layout(self.cr, layout)
+
+    def rect(self, x0, y0, x1, y1, fill=None, outline=None, width=1.0):
+        cr = self.cr
+        cr.rectangle(x0, y0, x1 - x0, y1 - y0)
+        if fill:
+            cr.set_source_rgb(*rgb(fill))
+            cr.fill_preserve()
+        if outline:
+            cr.set_source_rgb(*rgb(outline))
+            cr.set_line_width(width)
+            cr.stroke_preserve()
+        cr.new_path()
+
+    def line(self, pts, colour, width=1.0, dash=None):
+        cr = self.cr
+        cr.move_to(*pts[0])
+        for p in pts[1:]:
+            cr.line_to(*p)
+        cr.set_source_rgb(*rgb(colour))
+        cr.set_line_width(width)
+        cr.set_dash(dash or [])
+        cr.stroke()
+        cr.set_dash([])
 
     def bar(self, x, y, w, h, v, colour):
-        self.c.create_rectangle(x, y, x + w, y + h, fill=TRACK, width=0)
+        self.rect(x, y, x + w, y + h, fill=TRACK)
         if v is not None:
-            self.c.create_rectangle(x, y, x + w * max(0.0, min(v, 1.0)), y + h, fill=colour, width=0)
+            self.rect(x, y, x + w * max(0.0, min(v, 1.0)), y + h, fill=colour)
 
     def graph(self, x, y, w, h, history, colour):
-        u = self.u
-        self.c.create_rectangle(x, y, x + w, y + h, fill=BG, outline=TRACK, width=max(1, round(u)))
+        u, cr = self.u, self.cr
+        self.rect(x, y, x + w, y + h, fill=BG, outline=TRACK, width=max(1, round(u)))
         for f in (0.25, 0.5, 0.75):
             gy = y + h * (1 - f)
-            self.c.create_line(x, gy, x + w, gy, fill=FAINT, dash=(2, 4))
+            self.line([(x, gy), (x + w, gy)], FAINT, 1, dash=[2, 4])
             self.text(x + 8 * u, gy - 2 * u, f"{f * 100:.0f}%", 13, FAINT, anchor="sw")
         step = w / (HISTORY - 1)
         run = []
         for i, v in enumerate(list(history) + [None]):
             if v is None:
                 if len(run) >= 2:
-                    pts = [c for px, py in run for c in (px, py)]
-                    fill = pts + [run[-1][0], y + h, run[0][0], y + h]
-                    self.c.create_polygon(*fill, fill=TRACK, outline="")
-                    self.c.create_line(*pts, fill=colour, width=max(2, round(2.5 * u)))
+                    cr.move_to(*run[0])
+                    for p in run[1:] + [(run[-1][0], y + h), (run[0][0], y + h)]:
+                        cr.line_to(*p)
+                    cr.close_path()
+                    cr.set_source_rgb(*rgb(TRACK))
+                    cr.fill()
+                    self.line(run, colour, max(2, round(2.5 * u)))
                 run = []
                 continue
             run.append((x + i * step, y + h * (1 - max(0.0, min(v, 1.0)))))
         self.text(x + w - 8 * u, y + h + 6 * u, "last 2 minutes", 13, DIM, anchor="ne")
 
-    def rows(self, x, y, w, rows):
+    def rows(self, x, y, w, rows, line=48, sizes=(22, 18, 26)):
         """label ... value, with an optional dim note (a peak) between them."""
+        lpx, npx, vpx = sizes
         for label, value, colour, *note in rows:
-            self.text(x, y, label, 22, DIM)
+            self.text(x, y, label, lpx, DIM)
             if note and note[0]:
-                self.text(x + w * 0.44, y + 4 * self.u, note[0], 18, DIM)
-            self.text(x + w, y, value, 26, colour, anchor="ne")
-            y += 48 * self.u
+                self.text(x + w * 0.44, y + (lpx - npx) * self.u, note[0], npx, DIM)
+            self.text(x + w, y, value, vpx, colour, anchor="ne")
+            y += line * self.u
         return y
 
     # -- the screen --
-    def draw(self) -> None:
-        c = self.c
-        c.delete("all")
-        W, H = max(c.winfo_width(), 320), max(c.winfo_height(), 200)
-        self.u = u = min(W / 1600, H / 900)
-        s = self.stats
-        m = 40 * u
+    def on_draw(self, area, cr) -> bool:
+        self.cr = cr
+        x0, y0, x1, y1 = cr.clip_extents()
+        v = self.video_at
+        if (self.has_video and v and x0 >= v[0] and y0 >= v[1]
+                and x1 <= v[0] + v[2] and y1 <= v[1] + v[3]):
+            self.paint_video()                                # a new frame, nothing else
+        else:
+            self.draw(area.get_allocated_width(), area.get_allocated_height())
+        return True
 
+    def draw(self, W, H) -> None:
+        W, H = max(W, 320), max(H, 200)
+        self.rect(0, 0, W, H, fill=BG)
+        self.u = u = min(W / 1600, H / 900)
+        m = 40 * u
+        top = self.header(W, m)
+        s = self.stats or {}
+        # Where the video goes; asked for before it comes, so that it can.
+        lw = (W - 3 * m) * 0.62
+        vh = min(lw * 9 / 16, H - top - m - 260 * u)
+        self.video_size = (int(lw), int(vh))
+        self.video_at = (int(m), int(top), int(lw) + 1, int(vh) + 1)
+        if self.has_video:
+            self.draw_with_video(W, H, m, top, s, lw, vh)
+        else:
+            self.draw_figures(W, H, m, top, s)
+
+    def header(self, W, m) -> float:
+        u, s = self.u, self.stats
         self.text(m, m * 0.8, "ADAS VISION", 26, TEXT, bold=True)
         status = ("vision service not running" if s is None else
                   f"{s.get('source', '?')}   ·   pid {s.get('pid', '?')}   ·   "
                   f"{s.get('fps', 0):.1f} frames/s")
         self.text(W - m, m * 0.8, status, 20, CAUTION if s is None else DIM, anchor="ne")
+        return m * 0.8 + 60 * u
 
-        top = m * 0.8 + 60 * u
-        pw = (W - 3 * m) / 2
-        ph = H - top - m
-        s = s or {}
-        on_hat = s.get("hat_load") is not None
+    def hat_rows(self, s):
+        return [
+            ("Frames", f"{s.get('hat_fps', 0):.1f} fps", TEXT),
+            ("Most it can do", f"{s.get('hat_max_fps') or 0:.0f} fps", DIM),
+            ("Time per frame", f"{s.get('hat_latency_ms') or 0:.0f} ms", TEXT),
+            ("Chip temperature", f"{s.get('hat_temp_c') or 0:.0f} °C", temp_colour(s.get("hat_temp_c")),
+             f"peak {fmt(self.peaks.hat, '°C')}"),
+        ]
 
-        # AI HAT
-        x, y = m, top
-        c.create_rectangle(x, y, x + pw, y + ph, fill=PANEL, width=0)
-        ix, iw = x + 32 * u, pw - 64 * u
-        self.text(ix, y + 28 * u, "AI HAT+ 2", 22, DIM, bold=True)
-        self.text(ix + iw, y + 30 * u, "Hailo-10H", 18, DIM, anchor="ne")
-        load = s.get("hat_load")
-        self.text(ix, y + 62 * u, pct(load) if on_hat else "--", 104, load_colour(load))
-        self.bar(ix, y + 200 * u, iw, 14 * u, load, load_colour(load))
-        if on_hat:
-            ry = self.rows(ix, y + 240 * u, iw, [
-                ("Frames", f"{s.get('hat_fps', 0):.1f} fps", TEXT),
-                ("Most it can do", f"{s.get('hat_max_fps') or 0:.0f} fps", DIM),
-                ("Time per frame", f"{s.get('hat_latency_ms') or 0:.0f} ms", TEXT),
-                ("Chip temperature", f"{s.get('hat_temp_c') or 0:.0f} °C", temp_colour(s.get("hat_temp_c")),
-                 f"peak {fmt(self.peaks.hat, '°C')}"),
-            ])
-        else:
-            self.text(ix, y + 240 * u, "not in use" if self.stats else "no data", 24, DIM)
-            ry = y + 240 * u + 4 * 48 * u
-        self.graph(ix, ry + 12 * u, iw, y + ph - ry - 60 * u, self.hat, INFO)
-
-        # Pi
-        x = 2 * m + pw
-        c.create_rectangle(x, y, x + pw, y + ph, fill=PANEL, width=0)
-        ix = x + 32 * u
-        self.text(ix, y + 28 * u, "RASPBERRY PI 5", 22, DIM, bold=True)
-        self.text(ix + iw, y + 30 * u, "CPU, all cores", 18, DIM, anchor="ne")
-        load = s.get("cpu_load")
-        self.text(ix, y + 62 * u, pct(load), 104, load_colour(load))
-        self.bar(ix, y + 200 * u, iw, 14 * u, load, load_colour(load))
-        cores = s.get("cpu_cores", [])
-        cy = y + 240 * u
-        if cores:
-            gap = 14 * u
-            cw = (iw - gap * (len(cores) - 1)) / len(cores)
-            for i, v in enumerate(cores):
-                cx = ix + i * (cw + gap)
-                self.text(cx, cy, f"core {i + 1}", 16, DIM)
-                self.text(cx + cw, cy, pct(v), 16, TEXT, anchor="ne")
-                self.bar(cx, cy + 26 * u, cw, 8 * u, v, load_colour(v))
+    def pi_rows(self, s):
         mem, total = s.get("mem_used"), s.get("mem_total_gb")
         pk = self.peaks
-        ry = self.rows(ix, cy + 60 * u, iw, [
+        return [
             ("Memory", f"{mem * total:.1f} of {total:.0f} GB" if mem is not None and total else "--", TEXT),
             ("SoC temperature", fmt(self.soc, "°C"), temp_colour(self.soc), f"peak {fmt(pk.soc, '°C')}"),
             ("Pi draws", watts_text(self.power), TEXT, f"peak {fmt(pk.watts, 'W', 1)}"),
             ("Supply in", *supply_text(self.power),
              f"high {fmt(pk.v_high, 'V', 2)}   low {fmt(pk.v_low, 'V', 2)}"),
             ("Under-voltage", *undervolt_text(self.power)),
-        ])
+        ]
+
+    def cores(self, ix, cy, iw, s, px=16, bar=8) -> None:
+        u, cores = self.u, s.get("cpu_cores", [])
+        if not cores:
+            return
+        gap = 14 * u
+        cw = (iw - gap * (len(cores) - 1)) / len(cores)
+        for i, v in enumerate(cores):
+            cx = ix + i * (cw + gap)
+            self.text(cx, cy, f"core {i + 1}", px, DIM)
+            self.text(cx + cw, cy, pct(v), px, TEXT, anchor="ne")
+            self.bar(cx, cy + (px + 10) * u, cw, bar * u, v, load_colour(v))
+
+    def panel_head(self, x, y, pw, title, aside, value, compact=False):
+        """The panel, its title, the big percentage and its bar. Returns the inner x, width."""
+        u = self.u
+        self.rect(x, y, x + pw, y + self.ph, fill=PANEL)
+        ix, iw = x + 32 * u, pw - 64 * u
+        tpx, big, num_y, bar_y, bar_h = (18, 56, 50, 122, 10) if compact else (22, 104, 62, 200, 14)
+        self.text(ix, y + 28 * u, title, tpx, DIM, bold=True)
+        self.text(ix + iw, y + 30 * u, aside, tpx - 4, DIM, anchor="ne")
+        self.text(ix, y + num_y * u, pct(value), big, load_colour(value))
+        self.bar(ix, y + bar_y * u, iw, bar_h * u, value, load_colour(value))
+        return ix, iw
+
+    # The figures alone: two tall panels side by side, a graph in each.
+    def draw_figures(self, W, H, m, top, s) -> None:
+        u = self.u
+        pw = (W - 3 * m) / 2
+        self.ph = ph = H - top - m
+        y = top
+
+        ix, iw = self.panel_head(m, y, pw, "AI HAT+ 2", "Hailo-10H", s.get("hat_load"))
+        if s.get("hat_load") is not None:
+            ry = self.rows(ix, y + 240 * u, iw, self.hat_rows(s))
+        else:
+            self.text(ix, y + 240 * u, "not in use" if self.stats else "no data", 24, DIM)
+            ry = y + 240 * u + 4 * 48 * u
+        self.graph(ix, ry + 12 * u, iw, y + ph - ry - 60 * u, self.hat, INFO)
+
+        ix, iw = self.panel_head(2 * m + pw, y, pw, "RASPBERRY PI 5", "CPU, all cores", s.get("cpu_load"))
+        cy = y + 240 * u
+        self.cores(ix, cy, iw, s)
+        ry = self.rows(ix, cy + 60 * u, iw, self.pi_rows(s))
         self.graph(ix, ry + 12 * u, iw, y + ph - ry - 60 * u, self.cpu, INFO)
-        self.text(ix, y + ph - 34 * u, f"{pk.label()}  ·  r resets", 13, DIM)
+        self.text(ix, y + ph - 34 * u, f"{self.peaks.label()}  ·  r resets", 13, DIM)
+
+    # With the video: it and the two graphs on the left, the figures stacked on the right.
+    def draw_with_video(self, W, H, m, top, s, lw, vh) -> None:
+        u = self.u
+        self.paint_video()
+
+        gy = top + vh + 40 * u
+        gw = (lw - m) / 2
+        gh = H - m - gy - 26 * u
+        for i, (name, hist) in enumerate((("AI HAT load", self.hat), ("Pi CPU", self.cpu))):
+            gx = m + i * (gw + m)
+            self.text(gx, gy - 6 * u, name, 16, DIM, anchor="sw")
+            self.graph(gx, gy, gw, gh, hist, INFO)
+
+        x, pw = 2 * m + lw, W - 3 * m - lw
+        avail = H - top - m - m * 0.5
+        sizes, line = (17, 13, 20), 36
+
+        self.ph = avail * 0.42
+        ix, iw = self.panel_head(x, top, pw, "AI HAT+ 2", "Hailo-10H", s.get("hat_load"), compact=True)
+        if s.get("hat_load") is not None:
+            self.rows(ix, top + 150 * u, iw, self.hat_rows(s), line, sizes)
+        else:
+            self.text(ix, top + 150 * u, "not in use" if self.stats else "no data", 18, DIM)
+
+        y = top + self.ph + m * 0.5
+        self.ph = avail - self.ph
+        ix, iw = self.panel_head(x, y, pw, "RASPBERRY PI 5", "CPU, all cores", s.get("cpu_load"),
+                                 compact=True)
+        self.cores(ix, y + 150 * u, iw, s, px=14, bar=6)
+        self.rows(ix, y + 198 * u, iw, self.pi_rows(s), line, sizes)
+        self.text(ix, y + self.ph - 30 * u, f"{self.peaks.label()}  ·  r resets", 12, DIM)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="AI HAT and Pi load, on a screen of its own")
     ap.add_argument("--windowed", action="store_true", help="a window instead of full screen")
     ap.add_argument("--text", action="store_true", help="print to the terminal instead (ssh)")
+    ap.add_argument("--all-cores", action="store_true",
+                    help="don't keep off the display's cores (config.DISPLAY_CORES)")
     args = ap.parse_args()
     if args.text:
         peaks = Peaks()
@@ -387,11 +585,21 @@ def main() -> int:
                 time.sleep(1.0)
         except KeyboardInterrupt:
             return 0
-    import tkinter as tk
-
-    root = tk.Tk()
-    StatsWindow(root, fullscreen=not args.windowed)
-    root.mainloop()
+    # Off the display's cores too, below it in priority: drawing the video
+    # here is real work (runtime/priority.py).
+    if not args.all_cores:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import config
+        from runtime.priority import yield_to_display
+        print(f"stats window: {yield_to_display(config.DISPLAY_CORES, config.VISION_NICE)}",
+              flush=True)
+    # Started over ssh, only DISPLAY may be set, and GTK would then take X11
+    # (XWayland): find the desktop's Wayland socket instead.
+    run = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+    if "WAYLAND_DISPLAY" not in os.environ and (run / "wayland-0").exists():
+        os.environ.update(XDG_RUNTIME_DIR=str(run), WAYLAND_DISPLAY="wayland-0")
+    StatsWindow(fullscreen=not args.windowed)
+    Gtk.main()
     return 0
 
 

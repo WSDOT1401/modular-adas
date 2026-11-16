@@ -12,7 +12,8 @@ datagram with:
 Once a second it also writes its load figures (frame rate, Pi CPU, memory and
 temperature, the AI HAT's load and temperature) to ``runtime.health.STATS_FILE``
 for ``tools/stats_window.py``, a stats screen of its own: they stay off the
-driver's display.
+driver's display. While that window is open it also gets what the service
+sees, the frame with its boxes (runtime/preview.py).
 
 Stages come from ``config.STAGES``. Signs run today; lane is wired but its
 CV stages are still TODO. Forward collision is not built yet, so its icon
@@ -37,6 +38,7 @@ from adas_protocol import DEFAULT_CONTROL_PORT, FEATURE_ENABLE, MODULE_STATUS, S
 import config
 from capture.base import FrameSource
 from runtime.health import HealthMonitor, clear_stats, write_stats
+from runtime.preview import FramePreview
 from runtime.publisher import UdpPublisher
 
 
@@ -55,6 +57,7 @@ class Scheduler:
         self._health = HealthMonitor()
         self._stats_at = time.monotonic()
         self._stats_frames = 0
+        self._view = FramePreview(config.PREVIEW_FPS)
 
     # ---- the driver's choices (display -> here) ----------------------------------
     def _open_control(self) -> Optional[socket.socket]:
@@ -96,20 +99,38 @@ class Scheduler:
         from signs.pipeline import SignPipeline
         from signs.tracker import SignTracker
 
-        if not Path(config.SIGN_WEIGHTS).exists():      # a .pt, or a Hailo model folder
-            sys.exit(f"sign detector weights not found: {config.SIGN_WEIGHTS}\n"
-                     "copy b01.pt there (see adas/experiments/central/README.md) or pass --weights")
-        if Path(config.SIGN_WEIGHTS).is_dir():          # compiled for the AI HAT
-            from signs.hailo10 import HailoSignDetector
+        def find(weights: str, conf: float):
+            """A sign finder: a .pt, or a Hailo model folder (on the AI HAT)."""
+            if not Path(weights).exists():
+                sys.exit(f"sign model not found: {weights}\n"
+                         "see adas/experiments/central/README.md, or pass --weights")
+            if Path(weights).is_dir():
+                from signs.hailo10 import HailoSignDetector
 
-            detector = HailoSignDetector(config.SIGN_WEIGHTS, config.SIGN_CONF,
-                                         config.SIGN_HAILO_DEPTH)
-            where = "the Hailo AI HAT"
+                return HailoSignDetector(weights, conf, config.SIGN_HAILO_DEPTH)
+            return SignDetector(weights, config.SIGN_IMGSZ, conf, config.SIGN_DEVICE)
+
+        def where(model) -> str:
+            if getattr(model, "on_hailo", False):
+                return "the AI HAT"
+            return config.SIGN_DEVICE or "the CPU/GPU"
+
+        if config.SIGN_STACK == "v3":
+            from signs.v3 import TorchCropClassifier, V3Detector
+
+            m1 = find(config.V3_M1, config.V3_M1_CONF)
+            if Path(config.V3_M2).is_dir():
+                from signs.hailo10 import HailoCropClassifier
+
+                m2 = HailoCropClassifier(config.V3_M2)
+            else:
+                m2 = TorchCropClassifier(config.V3_M2, config.SIGN_DEVICE)
+            detector = V3Detector(m1, m2)
+            print(f"signs: sign_v3, M1 {Path(config.V3_M1).name} on {where(m1)}, "
+                  f"M2 {Path(config.V3_M2).name} on {where(m2)}", file=sys.stderr)
         else:
-            detector = SignDetector(config.SIGN_WEIGHTS, config.SIGN_IMGSZ, config.SIGN_CONF,
-                                    config.SIGN_DEVICE)
-            where = config.SIGN_DEVICE or "auto (CPU/GPU)"
-        print(f"signs: {config.SIGN_WEIGHTS} on {where}", file=sys.stderr)
+            detector = find(config.SIGN_WEIGHTS, config.SIGN_CONF)
+            print(f"signs: {config.SIGN_WEIGHTS} on {where(detector)}", file=sys.stderr)
         reader = vote = None
         if Path(config.SPEED_READER).is_file():
             from signs.speed import load_reader
@@ -167,17 +188,20 @@ class Scheduler:
             for frame in self._source.frames():
                 self._read_control()
                 payload = self._status()
-                detections = []
+                detections, seen = [], frame
                 if self._running("signs", self._signs):
                     events, detections = self._signs.update(frame)
                     payload.update(events)
                     self._log(events)
+                    # On the AI HAT the boxes are for a frame a few back: draw them on that one.
+                    seen = self._signs.frame if self._signs.frame is not None else frame
                 if self._running("lane", self._lane):
                     payload.update(self._lane(frame))
                 self._publisher.send(payload)
                 frames += 1
                 self._write_stats(frames)
-                if self._preview and not self._show(frame, detections):
+                self._view.update(seen, detections)
+                if self._preview and not self._show(seen, detections):
                     break
         finally:
             elapsed = max(time.monotonic() - started, 1e-6)
@@ -185,6 +209,7 @@ class Scheduler:
                   f"{self._source.dropped} dropped to keep up", file=sys.stderr)
             self._source.close()
             clear_stats()
+            self._view.close()
             if self._signs is not None:
                 self._signs.close()
             self._publisher.close()

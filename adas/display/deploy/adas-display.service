@@ -14,11 +14,10 @@ WorkingDirectory=%h/modular-adas/adas/display
 ExecStart=%h/modular-adas/adas/display/build/adas_display --screen auto
 Restart=always
 RestartSec=2
-# Through X11 (XWayland), not Wayland: the desktop (labwc) lets an X11 window
-# say which monitor it opens on, and a Wayland one not, so with two monitors
-# a Wayland display goes full screen on whichever the desktop picks.
-Environment=QT_QPA_PLATFORM=xcb
-Environment=DISPLAY=:0
+# A Wayland window, not X11: X11 windows share one X server (XWayland), and
+# a busy one there (the stats window's video) holds the display's frames up.
+Environment=QT_QPA_PLATFORM=wayland
+Environment=WAYLAND_DISPLAY=wayland-0
 
 [Install]
 WantedBy=default.target
