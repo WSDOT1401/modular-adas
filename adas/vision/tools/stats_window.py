@@ -20,7 +20,8 @@ On the Pi, next to the ADAS display on the round screen:
     python3 tools/stats_window.py --windowed      # a window instead
     python3 tools/stats_window.py --text          # in the terminal (ssh)
 
-q or Esc closes it. Plain Python with Tk, no packages: it doesn't need the
+Peaks (watts, temperatures, the supply's high and low) run from when the
+window opened; r resets them. q or Esc closes it. Plain Python with Tk, no packages: it doesn't need the
 venv. The AI HAT's load is worked out from its frame rate: HailoRT 5.1.1
 gives no reading from inside the Hailo-10H.
 """
@@ -81,20 +82,76 @@ def power() -> "dict | None":
     return {"volts": volts, "watts": watts, "flags": int(m.group(1), 16) if m else 0}
 
 
+_THERMAL = Path("/sys/class/thermal/thermal_zone0/temp")
+
+
+def soc_temp() -> "float | None":
+    """The SoC temperature, read here too so it shows with no model running."""
+    try:
+        return int(_THERMAL.read_text()) / 1000.0
+    except (OSError, ValueError):
+        return None
+
+
 def supply_text(p: "dict | None") -> "tuple[str, str]":
-    """The supply reading and its colour: red while it sags, amber once it has."""
+    """The supply voltage and its colour: amber under LOW_V."""
     if p is None or p.get("volts") is None:
         return "--", DIM
-    v, flags = p["volts"], p.get("flags") or 0
-    if flags & UNDERVOLT_NOW:
-        return f"{v:.2f} V  too low now", WARNING
-    if flags & UNDERVOLT_SEEN:
-        return f"{v:.2f} V  dipped since boot", CAUTION
+    v = p["volts"]
     return f"{v:.2f} V", CAUTION if v < LOW_V else TEXT
+
+
+def undervolt_text(p: "dict | None") -> "tuple[str, str]":
+    """What the Pi itself says about its supply: red while it sags, amber once it has."""
+    if p is None:
+        return "--", DIM
+    flags = p.get("flags") or 0
+    if flags & UNDERVOLT_NOW:
+        return "too low now", WARNING
+    if flags & UNDERVOLT_SEEN:
+        return "dipped since boot", CAUTION
+    return "never", TEXT
 
 
 def watts_text(p: "dict | None") -> str:
     return "--" if p is None or p.get("watts") is None else f"{p['watts']:.1f} W"
+
+
+class Peaks:
+    """The most (and, for the supply, the least) seen since the window opened
+    or was last reset with r. The supply's low matters more than its high:
+    a sag is what makes the Pi throttle."""
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.watts = self.soc = self.hat = self.v_high = self.v_low = None
+        self.since = time.time()
+
+    @staticmethod
+    def _hi(old, new):
+        return new if old is None or (new is not None and new > old) else old
+
+    @staticmethod
+    def _lo(old, new):
+        return new if old is None or (new is not None and new < old) else old
+
+    def update(self, stats: "dict | None", p: "dict | None", soc: "float | None") -> None:
+        p, stats = p or {}, stats or {}
+        self.watts = self._hi(self.watts, p.get("watts"))
+        self.v_high = self._hi(self.v_high, p.get("volts"))
+        self.v_low = self._lo(self.v_low, p.get("volts"))
+        self.soc = self._hi(self.soc, soc)
+        self.hat = self._hi(self.hat, stats.get("hat_temp_c"))
+
+    def label(self) -> str:
+        mins = int((time.time() - self.since) // 60)
+        return f"peaks over {mins // 60} h {mins % 60:02d} min" if mins >= 60 else f"peaks over {mins} min"
+
+
+def fmt(v, unit: str, digits: int = 0) -> str:
+    return "--" if v is None else f"{v:.{digits}f} {unit}"
 
 
 def read() -> "dict | None":
@@ -143,10 +200,13 @@ def text_view(s: "dict | None") -> str:
     return "\n".join(out) + "\n"
 
 
-def power_line(p: "dict | None") -> str:
+def power_line(p: "dict | None", soc: "float | None", pk: Peaks) -> str:
     if p is None:
         return "Power   -- (no vcgencmd: not a Pi)\n"
-    return f"Power   in {supply_text(p)[0]}   Pi draws {watts_text(p)}\n"
+    return (f"Power   in {supply_text(p)[0]} (high {fmt(pk.v_high, 'V', 2)}, low {fmt(pk.v_low, 'V', 2)}), "
+            f"under-voltage {undervolt_text(p)[0]}\n"
+            f"        Pi draws {watts_text(p)} (peak {fmt(pk.watts, 'W', 1)})   "
+            f"SoC {fmt(soc, '°C')} (peak {fmt(pk.soc, '°C')})   {pk.label()}\n")
 
 
 # ---- window --------------------------------------------------------------------
@@ -167,9 +227,13 @@ class StatsWindow:
         self.c.pack(fill="both", expand=True)
         for key in ("<Escape>", "q", "Q"):
             root.bind(key, lambda _e: root.destroy())
+        for key in ("r", "R"):
+            root.bind(key, lambda _e: (self.peaks.reset(), self.draw()))
         root.bind("<Configure>", lambda _e: self.draw())
         self.stats: "dict | None" = None
         self.power: "dict | None" = None
+        self.soc: "float | None" = None
+        self.peaks = Peaks()
         self.hat = deque([None] * HISTORY, maxlen=HISTORY)
         self.cpu = deque([None] * HISTORY, maxlen=HISTORY)
         self.tick()
@@ -177,6 +241,10 @@ class StatsWindow:
     def tick(self) -> None:
         self.stats = read()
         self.power = power()
+        self.soc = soc_temp()
+        if self.soc is None and self.stats:
+            self.soc = self.stats.get("cpu_temp_c")
+        self.peaks.update(self.stats, self.power, self.soc)
         s = self.stats or {}
         self.hat.append(s.get("hat_load"))
         self.cpu.append(s.get("cpu_load"))
@@ -217,8 +285,11 @@ class StatsWindow:
         self.text(x + w - 8 * u, y + h + 6 * u, "last 2 minutes", 13, DIM, anchor="ne")
 
     def rows(self, x, y, w, rows):
-        for label, value, colour in rows:
+        """label ... value, with an optional dim note (a peak) between them."""
+        for label, value, colour, *note in rows:
             self.text(x, y, label, 22, DIM)
+            if note and note[0]:
+                self.text(x + w * 0.44, y + 4 * self.u, note[0], 18, DIM)
             self.text(x + w, y, value, 26, colour, anchor="ne")
             y += 48 * self.u
         return y
@@ -258,7 +329,8 @@ class StatsWindow:
                 ("Frames", f"{s.get('hat_fps', 0):.1f} fps", TEXT),
                 ("Most it can do", f"{s.get('hat_max_fps') or 0:.0f} fps", DIM),
                 ("Time per frame", f"{s.get('hat_latency_ms') or 0:.0f} ms", TEXT),
-                ("Chip temperature", f"{s.get('hat_temp_c') or 0:.0f} °C", temp_colour(s.get("hat_temp_c"))),
+                ("Chip temperature", f"{s.get('hat_temp_c') or 0:.0f} °C", temp_colour(s.get("hat_temp_c")),
+                 f"peak {fmt(self.peaks.hat, '°C')}"),
             ])
         else:
             self.text(ix, y + 240 * u, "not in use" if self.stats else "no data", 24, DIM)
@@ -285,16 +357,17 @@ class StatsWindow:
                 self.text(cx + cw, cy, pct(v), 16, TEXT, anchor="ne")
                 self.bar(cx, cy + 26 * u, cw, 8 * u, v, load_colour(v))
         mem, total = s.get("mem_used"), s.get("mem_total_gb")
+        pk = self.peaks
         ry = self.rows(ix, cy + 60 * u, iw, [
             ("Memory", f"{mem * total:.1f} of {total:.0f} GB" if mem is not None and total else "--", TEXT),
-            ("SoC temperature", f"{s['cpu_temp_c']:.0f} °C" if "cpu_temp_c" in s else "--",
-             temp_colour(s.get("cpu_temp_c"))),
-            ("Vision service", f"{s.get('fps', 0):.1f} frames/s" if self.stats else "not running",
-             TEXT if self.stats else CAUTION),
-            ("Supply in", *supply_text(self.power)),
-            ("Pi draws", watts_text(self.power), TEXT),
+            ("SoC temperature", fmt(self.soc, "°C"), temp_colour(self.soc), f"peak {fmt(pk.soc, '°C')}"),
+            ("Pi draws", watts_text(self.power), TEXT, f"peak {fmt(pk.watts, 'W', 1)}"),
+            ("Supply in", *supply_text(self.power),
+             f"high {fmt(pk.v_high, 'V', 2)}   low {fmt(pk.v_low, 'V', 2)}"),
+            ("Under-voltage", *undervolt_text(self.power)),
         ])
         self.graph(ix, ry + 12 * u, iw, y + ph - ry - 60 * u, self.cpu, INFO)
+        self.text(ix, y + ph - 34 * u, f"{pk.label()}  ·  r resets", 13, DIM)
 
 
 def main() -> int:
@@ -303,9 +376,12 @@ def main() -> int:
     ap.add_argument("--text", action="store_true", help="print to the terminal instead (ssh)")
     args = ap.parse_args()
     if args.text:
+        peaks = Peaks()
         try:
             while True:
-                sys.stdout.write("\033[H\033[J" + text_view(read()) + power_line(power())
+                stats, p, soc = read(), power(), soc_temp()
+                peaks.update(stats, p, soc)
+                sys.stdout.write("\033[H\033[J" + text_view(stats) + power_line(p, soc, peaks)
                                  + "\nCtrl+C to quit\n")
                 sys.stdout.flush()
                 time.sleep(1.0)
