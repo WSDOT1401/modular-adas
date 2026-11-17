@@ -1028,3 +1028,287 @@ assert a.reject_weight == 1.0 or w != base, \
 
 **Check that a flag changed something before spending fifteen minutes measuring
 what it changed.** Three minutes of arithmetic in a REPL would have caught both.
+
+## 2026-11-17 — The AI HAT's M2 is broken, and the number that said otherwise was measured on its own calibration set
+
+`m2.hef` scores **61.9%** on the 1151 held-out val crops. `m2.pt` scores
+**83.7%** on the same files, same decode path, same machine-independent
+comparison. That is not quantization noise. It is a broken model.
+
+| | `m2.pt` | `m2.hef` |
+|---|---|---|
+| all-class | **83.7%** (963/1151) | **61.9%** (712/1151) |
+| `not_a_sign` | 82.1% | **93.5%** ↑ |
+| `information` | 85.4% | 68.6% |
+| `no_stopping_parking` | 100% (85/85) | **0%** (0/85) |
+| `u_turn` | 95.5% (42/44) | **0%** (0/44) |
+| `height_limit` | 65.4% | 0% |
+| quiet rate | 92.8% | 94.8% |
+
+### The signature: it only ever predicts 8 of 29 classes
+
+    849 not_a_sign · 132 information · 83 chevron · 31 pedestrian_crossing
+     30 speed_limit · 16 other_regulatory · 7 keep_left_or_right · 2 no_stopping_parking
+
+Twenty-one classes are **never emitted at all**, which is why so many score
+exactly zero. Uniform INT8 error does not do this — it scatters mistakes around
+the confusion matrix. It does not annihilate whole classes while the single
+largest class gets *better*.
+
+### Why: the calibration crops came from one clip
+
+`export_m2_hailo.py` builds M2's calibration set by running M1 over ~600 frames
+of a **single** dashcam clip and cropping what it finds, plus random road
+patches. Whatever sign types that one clip contained are the only ones QFT ever
+tuned the int8 weights against. The ~8 surviving classes are that clip's
+contents; everything absent had no signal and collapsed into `not_a_sign`.
+
+`COMPILE_HAILO.md` §4 also notes the sign-crop vs road-patch split "was printed
+by the first run, but that log was overwritten". So we do not know how much of
+the 1024 was even signs. If most were road patches, that is the `not_a_sign`
+improvement explained too.
+
+### The 98.6% was the training accuracy of the quantization
+
+`COMPILE_HAILO.md` §6 reports 98.6% top-1 agreement with PyTorch and flags it
+"Not held out." It is worse than not held out: those 1024 crops **are** the QFT
+training data. Quantization-aware fine-tuning adjusts the int8 weights
+specifically to reproduce the float model on exactly those inputs. Measuring
+agreement there measures how well the fit fit. It was never evidence about
+deployment, and the one number that looked reassuring was the one guaranteed to.
+
+**Score the quantized model on held-out labelled data or do not quote a number.**
+
+### What was ruled out, and what it cost to rule out
+
+Everything on the Pi is correct. Checked over ssh, line by line:
+
+| | value | matches `.pt`? |
+|---|---|---|
+| `metadata.yaml` → `imgsz` | `[1280, 1280]` | yes |
+| M1 conf (`config.V3_M1_CONF`) | 0.25 | yes |
+| NMS IoU | 0.7 | yes |
+| `v3.py:square_crop` | square-on-centre, clamped, Lanczos | yes |
+| `READABLE` | 24 px | yes |
+| M2 normalization | ImageNet, compiled into the `.hef` | yes |
+| HailoRT / firmware | 5.1.1 / 5.1.1, HAILO10H | loads, runs |
+
+Also dead: **channel order** — feeding BGR instead of RGB moved 61.9% → 62.2%,
+i.e. nothing. And **class-index misalignment** — the errors collapse toward one
+class rather than shifting systematically.
+
+`hailo10.py` defaults to `conf=0.4` and that is a red herring; the scheduler
+overrides it with `config.V3_M1_CONF` = 0.25.
+
+### The 733-vs-2 red herring
+
+Running `central/sign_v3/run.py` with the `.pt` on `test-clip.mp4` (3000 frames,
+stride 2) tallies a displayed class **733** times, against the HAT's **2
+announcements**. That gap is almost entirely by design and I chased it for a
+while before reading `classes.py`:
+
+```python
+IGNORED = frozenset({"other_regulatory", "other_warning", "information"})
+```
+
+687 of the 733 are `information`, which is never published. `SignTracker` then
+fires each class once per sighting and needs 3 frames to confirm, so the
+remaining 46 frame-hits collapse to a couple of events. **Per-frame detection
+counts and driver-facing announcements are different units.** Compare like with
+like or the architecture looks like a bug.
+
+What survived that correction is still unexplained by config: on that clip the
+`.pt`'s strongest publishable signal (`no_right_turn`, 28 frames, far above the
+3-frame threshold) produced no announcement, while its weakest
+(`keep_left_or_right`, 1 frame, which *cannot* reach the threshold) did.
+Consistent with the crop result.
+
+### What the field says
+
+Nobody has posted this exact signature. But calibration data quality is the most
+commonly cited cause of "my `.hef` is much worse than my `.pt`", and the advice
+is specific enough to match: Ultralytics' Hailo guide says fix the calibration
+data first and that a small in-domain set beats a large out-of-domain one; a
+Hailo forum answer says to verify the calibration set **covers all classes**.
+Ours does not.
+
+One guard we did pass: the DFC silently lowers its optimization level below 1024
+calibration images or without a GPU. M2 had exactly 1024 and a working GPU.
+
+**The standard first debugging step, which we skipped:** run the model in the
+DFC's emulator on the PC (`SDK_FP_OPTIMIZED`, then `SDK_QUANTIZED`) against
+PyTorch, *before* compiling. That separates parse error from quantization error
+from runtime error. We measured only the end of the chain, so we know the result
+is broken but not which stage broke it.
+
+### Training on the HAT is not a thing
+
+Asked whether we could train natively on the AI HAT and skip conversion. No —
+Hailo-8/8L/10H are inference-only: no training mode, no backward pass, no
+general-purpose FP32 path. The DFC's input is always already-trained weights.
+The only adjacent real technique (arXiv 2607.18101) runs a *frozen* backbone on
+the HAT and trains a small head on the host CPU — and its stated limitation is
+that degraded INT8 features make the head learn worse, which is our exact
+failure mode.
+
+### Plan
+
+1. Build a balanced calibration set covering all 29 classes from the labelled
+   crops we already have, instead of one clip's M1 output.
+2. Emulator check on the PC before recompiling — confirm quantization is the
+   culprit.
+3. Recompile M2, re-score on the same 1151 crops. Numbers to beat: `.pt` 83.7%,
+   current `.hef` 61.9%.
+4. Then M1, which has **never been measured at all** — its layer-noise analysis
+   OOM'd, and no `.hef`-vs-`.pt` comparison exists. Its calibration came from the
+   same single clip. One class, so no class coverage to lose; the risk is scene
+   diversity.
+
+Nothing here blocks the demo. Both models run correctly on the Pi's CPU through
+PyTorch at the `.pt` numbers. The HAT is a broken speed optimization, not a
+dependency.
+
+### Notes from the Pi session
+
+- `scp` to the Pi hangs from this Mac; macOS defaults to the SFTP protocol.
+  **`scp -O`** (legacy protocol) works. Authentication was never the problem.
+- macOS `tar` stamps `com.apple.provenance` xattrs, so GNU tar on the Pi warns
+  once per file and extraction leaves a `._` AppleDouble stub beside every file.
+  `COPYFILE_DISABLE=1 tar ...` avoids both.
+- The `.hef` M2 runs at **2.15 ms/crop** on the HAT. The speed was never in doubt.
+- `sign_v3/README.md`'s Mac baseline of "M1 101 ms/frame" is stale — that was a
+  500-frame run dominated by MPS warm-up. Over 3000 frames it settles to
+  **33 ms/frame**, 27.1 fps end to end.
+
+## 2026-11-18 — M2 fixed on the HAT: it was AdaRound, not the calibration set, and macro is the metric we should have been quoting
+
+Steps 1–3 of yesterday's plan are done. The new `m2.hef` is installed on the Pi
+and measured **on the chip**, not in the emulator.
+
+| on the Pi's HAT, 1151 held-out crops | micro | **macro (12 displayed)** | classes emitted | ms/crop |
+|---|---|---|---|---|
+| old `m2.hef` (single-clip calibration) | 61.6% | **12.8%** | 10 | 2.14 |
+| new `m2.hef` | **74.5%** | **64.3%** | **27** | 2.62 |
+| `m2.pt` (torch, the ceiling) | 83.7% | **86.3%** | 27 | — |
+
+### The headline correction: every number we ever quoted was micro
+
+`not_a_sign` is 569 of the 1151 val crops. A model that over-predicts it scores
+well on a metric that is mostly measuring that one class. Macro recall over the
+12 displayed classes with n ≥ 5 is the honest number, and it says the old model
+was far worse than "61.9%" ever suggested:
+
+**12.8% macro.** Zero on 17 classes — `stop` 0/6, `no_stopping_parking` 0/85,
+`u_turn` 0/44, `height_limit` 0/26, `no_left_turn` 0/13, both curves, both
+T-junctions, `merge` 0/14. It was a 10-class model wearing a 29-class label, and
+60% of its micro score was `not_a_sign` and `information`.
+
+The INT8 cost is likewise not the 9.2 points the micro comparison shows. It is
+**22 points of macro** (86.3 → 64.3). Micro understated the damage at every
+stage of this investigation.
+
+### Yesterday's stated hypothesis was wrong
+
+The plan said the single-clip calibration set caused class annihilation, so a
+balanced set covering all 29 classes would fix it. `build_m2_calib.py` built
+that set — 1024 crops, 28 of 29 classes, from `m2/train` only, never touching
+the val crops.
+
+It made things **worse**: 47.7%, model-output SNR 0.73 dB, still only 12 classes.
+
+The decisive evidence against the hypothesis: **`chevron` had 52 real crops in
+the balanced set** — more than `speed_limit` — and still scored 0/46. A class
+can be well represented in calibration and still be annihilated. Coverage was
+never the mechanism.
+
+### What actually fixed it: optimization level 4
+
+Two model-script lines, neither of which `export_m2_hailo.py` was setting:
+
+```
+model_optimization_flavor(optimization_level=4, compression_level=0)
+model_optimization_config(calibration, calibset_size=1024)
+```
+
+- **Level 4 enables AdaRound.** At the default level 2 the log says
+  `Quantization-Aware Fine-Tuning skipped` and runs plain QFT. Level 4 replaces
+  it with AdaRound, ~23 min over 55 blocks. That one change took SNR 0.73 → 4.63 dB.
+- **`calibset_size`**: the Statistics Collector defaults to **64** crops even
+  when handed 1024. It sets the activation ranges off those 64. We were giving
+  it 16× the data it was using.
+
+Full progression, emulator:
+
+| config | output SNR | micro | classes |
+|---|---|---|---|
+| balanced calib only | 0.73 dB | 47.7% | 12 |
+| + `a16` dw1 dw7 normalization1 dw4 | 0.97 dB | 50.9% | 13 |
+| + **opt-level 4, calibset 1024** | **4.63 dB** | **75.3%** | **27** |
+| + 3 more `a16` layers (7 total) | 4.22 dB | 74.5% | 27 |
+| FP_OPTIMIZED / torch | — | 83.7% | 27 |
+
+### Per-layer 16-bit promotion is a dead lever
+
+Promoting the layers the DFC names buys almost nothing: +3.2 points the first
+round, **−0.8 the second** (within AdaRound's run-to-run variation — it is a
+training process, not a deterministic pass). The DFC names a completely
+different triple each round:
+
+    round 1:  dw1, dw7, normalization1, dw4
+    round 2:  dw9, dw5, conv41
+    round 3:  dw6, conv5, conv7
+
+That rotation is the signature of error spread evenly across the network with no
+single culprit. MobileNetV3-Small is simply a hard INT8 target: hard-swish's wide
+dynamic range, squeeze-excite activation spikes, and depthwise per-channel weight
+spread against per-tensor scaling.
+
+### The emulator was honest
+
+`SDK_QUANTIZED` in the DFC predicted **74.5%**. The chip delivered **74.5%**.
+Running the emulator check before compiling — the step skipped the first time —
+would have caught the original break without a single Pi round-trip. It is the
+cheapest diagnostic available and it is now `tools/check_m2_quant.py`.
+
+(The old `.hef` measures 61.6% / 10 classes on hardware against the 61.9% / 8
+classes recorded yesterday; a few crops differ between the decode paths. The
+conclusion is unaffected.)
+
+### Latency: 2.14 → 2.62 ms/crop
+
+The 7 layers at 16-bit no longer fit one context:
+
+    Single context flow failed - Resources presolve failed: lcus=(100/80)
+    Found valid partition to 4 contexts
+
+Four contexts means three weight reloads per inference, +23% latency. At 380
+crops/s against a handful of crops per frame at 30 fps, it is not worth another
+25-minute AdaRound run to recover.
+
+### What is still wrong
+
+- **`speed_limit`: 47.2% on the chip (17/36) vs 94.4% in torch.** The single
+  largest loss, on the sign that matters most. Not yet explained.
+- Next worst are all low-count: `no_pedestrians` 1/5, `merge` 3/14,
+  `other_warning` 2/9, `height_limit` 6/26, `turn_right` 2/7.
+- `reserved_for_bus` quantizes blind — no crops exist anywhere, so it is
+  unscoreable rather than broken.
+- We never isolated whether the balanced calibration set helps at all, since
+  AdaRound was found before it was tested alone.
+
+### Installed
+
+- Pi: `sign_v3/m2_hailo_model/` is the new build. The old one is
+  `m2_hailo_model_pre_adaround/` — `config.py` resolves the model by folder
+  name, so swapping back is two `mv`s and no code change.
+- `tools/score_m2_hef.py` scores a `.hef` on the chip and reports macro,
+  per-class recall and ms/crop. Reuses `HailoCropClassifier`, so ~90 lines.
+- `build_m2_calib.py` (balanced calibration) and `pack_m2_val.py` (the 1151 val
+  crops as one `.npz`) let the DFC machine score without the repo or dataset.
+
+### Step 4 still open
+
+M1 has **never been measured on the HAT at all**. Its calibration came from the
+same single clip, and its layer-noise analysis OOM'd. One class, so there is no
+class coverage to lose — the risk is scene diversity. The same two config lines
+that fixed M2 have not been tried on it.

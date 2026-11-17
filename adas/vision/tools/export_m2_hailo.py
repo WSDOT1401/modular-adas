@@ -11,7 +11,14 @@ Calibration: INT8 needs crops that look like what M2 will see, so they are
 real ones. M1 runs over a dashcam clip and every box it finds becomes a crop
 cut exactly as on the Pi (signs/v3.py: squared around the box, nothing under
 24 px, resized with Lanczos), plus a few random patches of road for the
-not_a_sign end.
+not_a_sign end. Prefer the balanced set from the labelled crops instead:
+run thai-traffic-sign-v3/build_m2_calib.py and drop its .npy in --work.
+
+The defaults here are the config that works. Optimization level 4 (AdaRound)
+is the one that matters: at the DFC default of 2 this builds a model that only
+ever predicts 10 of 29 classes -- 12.8% macro recall on held-out crops, zero on
+stop signs. See JOURNAL.md 2026-11-18. Score any build with check_m2_quant.py
+before compiling, and score_m2_hef.py on the Pi after.
 
 The ImageNet normalisation M2 was trained with is compiled into the .hef, so
 the Pi feeds it plain RGB bytes. Out come 29 logits; softmax is on the Pi.
@@ -59,6 +66,8 @@ def calibration(clip: str, m1: str, size: int, count: int, out: Path):
         if len(data) >= count:
             print(f"calibration: reusing {cache}")
             return data[:count]
+    if not clip:
+        sys.exit(f"no --clip and no {cache}: run build_m2_calib.py and copy its .npy there")
     det = YOLO(m1)
     cap = cv2.VideoCapture(clip)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -112,16 +121,25 @@ def export_onnx(m2: str, path: Path) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Compile sign_v3 m2.pt to a Hailo .hef")
-    ap.add_argument("--clip", required=True, help="dashcam clip: M1 cuts the calibration crops from it")
+    ap.add_argument("--clip", help="dashcam clip: M1 cuts the calibration crops from it. Omit when\n                         --work already holds an m2_calib_<size>.npy -- build_m2_calib.py\n                         writes a balanced one and a one-clip set is what broke the last .hef")
     ap.add_argument("--m1", default=str(V3 / "m1.pt"))
     ap.add_argument("--m2", default=str(V3 / "m2.pt"))
     ap.add_argument("--target", default="hailo10h", choices=("hailo10h", "hailo8", "hailo8l"))
     ap.add_argument("--crops", type=int, default=1024, help="calibration crops")
     ap.add_argument("--out", default=str(V3 / "m2_hailo_model"))
     ap.add_argument("--work", default=str(Path.home() / "hailo-calib-m2"))
-    ap.add_argument("--a16", nargs="*", default=["dw1"], metavar="LAYER",
-                    help="layers kept at 16 bits: dw1, the first depthwise conv, loses most "
-                         "to INT8 (3 dB partial SNR) and costs speed-limit crops")
+    ap.add_argument("--a16", nargs="*", metavar="LAYER",
+                    default=["dw1", "dw7", "normalization1", "dw4", "dw9", "dw5", "conv41"],
+                    help="layers kept at 16 bits. Worth little on its own (+3 points, then -1 "
+                         "for the next three) -- the DFC names a different triple every round, "
+                         "which is error spread over the whole net, not one culprit")
+    ap.add_argument("--opt-level", type=int, default=4,
+                    help="DFC optimization level. 4 runs AdaRound (~23 min); the default 2 logs "
+                         "'Quantization-Aware Fine-Tuning skipped' and runs plain QFT. This is "
+                         "the setting that fixed M2: output SNR 0.73 -> 4.63 dB, 47.7% -> 75.3%")
+    ap.add_argument("--calibset", type=int, default=1024,
+                    help="crops the Statistics Collector uses for activation ranges. It defaults "
+                         "to 64 even when handed 1024, and sets every range off those 64")
     args = ap.parse_args()
 
     from hailo_sdk_client import ClientRunner  # type: ignore
@@ -140,6 +158,9 @@ def main() -> int:
               "[58.395, 57.12, 57.375])\n")
     if args.a16:
         script += f"quantization_param([{', '.join('m2/' + l for l in args.a16)}], precision_mode=a16_w16)\n"
+    script += f"model_optimization_flavor(optimization_level={args.opt_level}, compression_level=0)\n"
+    script += f"model_optimization_config(calibration, calibset_size={args.calibset})\n"
+    print("\nmodel script:\n" + "".join("  " + l + "\n" for l in script.strip().split("\n")))
     runner.load_model_script(script)
     runner.optimize(calib)
     hef = runner.compile()
