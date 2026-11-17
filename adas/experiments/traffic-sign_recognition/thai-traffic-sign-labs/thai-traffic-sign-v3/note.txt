@@ -71,6 +71,11 @@ Class balance is the real problem: information is 70% of the pool.
 Arhway's footage:
 - first batch:
   - start: 20220925122310_149820.MP4
-  - end: 20220925122310_149800.MP4
+  - end: 20220925115622_149800.MP4
+- second batch:
+  - start: 20220925115522_149799.MP4
+  - end-1: 20220925112822_149772.MP4
+  - start-2: 20220925091256_149745.MP4
+  - end-2: 20220925084037_149723.MP4
 
 Currently autolabelv2 isn't efficient for knowledge distill. need to have created a new prompt for qwen.
