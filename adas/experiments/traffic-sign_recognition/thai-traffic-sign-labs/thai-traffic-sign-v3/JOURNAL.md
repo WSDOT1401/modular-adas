@@ -1312,3 +1312,117 @@ M1 has **never been measured on the HAT at all**. Its calibration came from the
 same single clip, and its layer-noise analysis OOM'd. One class, so there is no
 class coverage to lose — the risk is scene diversity. The same two config lines
 that fixed M2 have not been tried on it.
+
+## 2026-11-18 — M1 on the HAT is fine, and "the sign never appears" was never a model problem
+
+Step 4 of the 2026-11-17 plan is done, and it closes without a fix, because
+there was nothing to fix.
+
+### M1 survived quantization intact
+
+428 held-out frames, 476 hand-labelled boxes, conf 0.25 (`config.V3_M1_CONF`,
+what the dash runs), IoU 0.5:
+
+| | recall | precision | boxes |
+|---|---|---|---|
+| `m1.pt` (torch, MPS) | 81.9% (390/476) | 75.1% | 519 |
+| **`m1.hef` (AI HAT)** | **82.4%** (392/476) | 74.7% | 525 |
+
+Identical within noise, the chip marginally ahead. The worry was misplaced:
+**M1's calibration came from the same single clip that destroyed M2, and it did
+not matter**, because M1 is class-agnostic. There are no classes to annihilate.
+One output, one failure mode, and INT8 did not touch it.
+
+Recall by box size is the same shape on both, and it is where M1 actually
+costs us something:
+
+    24-32 px   68.6% torch / 69.8% chip
+    32-48 px   76.1%        / 78.2%
+    48-64 px   93.0%        / 91.9%
+    64-96 px   85.5%        / 89.2%
+    96+  px    91.1%        / 86.1%
+
+Half the val signs (232 of 476) are under 48 px. A missed 24 px sign is a
+warning that arrives late, not one that never arrives -- the sign gets bigger
+as you approach. Raising small-sign recall is a training question (the
+`floor00/16/24` variants exist for exactly this), not a quantization one.
+
+`tools/score_m1.py` does this. The Pi has no labels or crops on it, so it runs
+the chip with `--dump` and the Mac scores that JSON with `--preds`: both
+backends then go through identical matching code, which is the only way the
+two numbers are comparable.
+
+### The symptom had nothing to do with either model
+
+The complaint was that pedestrian-crossing signs never reach the dash. Both
+models handle them well:
+
+- M1 finds **87.5%** of them (49/56), above its own average
+- M2 names them correctly **95.2%** of the time (59/62)
+
+`pedestrian_crossing` is simply **not one of the 13 classes the dash displays**.
+`signs/v3.py` dropped every other class before anything downstream could see
+it. Fifteen classes are recognised and discarded this way: pedestrian crossing,
+no-stopping-parking, u-turn, height limit, chevron, merge, both T-junctions,
+no-pedestrians, and the rest.
+
+**No amount of model work would ever have fixed this**, and an afternoon went
+into M1 before the one-line cause turned up. The lesson is the same one the
+2026-11-16 `.hef` taught: measure the stage you are blaming before you blame it.
+
+### The preview now shows where a sign dies
+
+The live view (`pi_start_v3.sh` -> `tools/stats_window.py` -> `runtime/preview.py`)
+only ever drew boxes that survived all the filters. A sign the pipeline
+recognised and discarded was drawn as *nothing at all*, which is why the
+discard was invisible from the driver's seat.
+
+`signs/v3.py` now returns every box M1 found, tagged with how far it got:
+
+| stage | meaning | preview |
+|---|---|---|
+| `shown` | the driver is told | green, named |
+| `v3_quiet` | a displayed class the dash still never announces (`information`) | amber, named |
+| `other` | M2 named it, not one of v3's classes | magenta, **not** named |
+| `m1_only` | under 24 px, M2 was never asked | magenta, thinner |
+
+Two things that were wrong on the way here and are worth not repeating:
+
+- `information` is in `displayed` **and** in `classes.IGNORED`, so it is drawn
+  but never announced. Tagging it `shown` made green mean two different things.
+  `shown` now requires `publishable()` too.
+- Boxes were 2 px and grey. People genuinely did not see them. Everything is
+  3-4 px minimum now and nothing is grey; the label is a third larger.
+
+Only v3's own classes get a name -- magenta says "the pipeline saw this"
+without implying the dash will announce it, which is the honest claim.
+
+**The risk in this change** is that a `quiet`/`other` box leaks into an
+announcement, so `pipeline.py` filters on `stage == "shown"` and
+`tests/unit/test_signs.py::test_only_shown_stage_is_published` guards it. A
+second test covers the b01 stack, which emits no `stage` at all and must keep
+behaving as before.
+
+### Confirmed live, end to end
+
+`2026_0912_012925.MP4` on the Pi, both models on the HAT:
+
+    [ 21.8 s] sign_seen: right_curve
+    [ 45.7 s] sign_seen: speed_limit
+    [ 45.9 s] sign_seen: turn_left
+    [ 46.2 s] speed_limit: 30,  sign_seen: speed_limit
+    [ 48.4 s] sign_seen: keep_right
+    [ 50.3 s] sign_seen: stop
+
+`stop`, `keep_right` and `turn_left` are classes the pre-AdaRound M2 scored
+**zero** on. The speed reader also got the number off the limit sign.
+
+### Open
+
+- `speed_limit` is still 47.2% on the chip against 94.4% in torch. Unexplained,
+  and it is the sign that matters most.
+- Small-sign recall (~70% under 32 px) is M1's real ceiling, on both backends.
+- Which classes the dash *should* display is a product decision nobody has
+  revisited. Fifteen recognised classes are currently thrown away.
+- The camera is still not detected (`No cameras available!`), so everything
+  here was measured on clips. Suspected ribbon cable, unchanged since 11-17.

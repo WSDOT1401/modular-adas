@@ -183,3 +183,29 @@ def test_tracker_holds_a_repeat_back_while_the_car_waits():
     assert visit() == []                         # same sign, seconds later: quiet
     clock[0] += 20
     assert visit() == ["pedestrian_crossing"]    # a new one, well down the road
+
+
+def test_only_shown_stage_is_published():
+    """The preview gets every box; the driver only ever hears about "shown".
+
+    v3.py stopped filtering so the live view can draw what M1 found. If this
+    breaks, the dash starts announcing classes it is configured never to show.
+    """
+    tagged = [dict(box("speed_limit"), stage="shown"),
+              dict(box("pedestrian_crossing"), stage="other"),
+              dict(box("information"), stage="v3_quiet"),
+              dict(box("too_small"), stage="m1_only")]
+    pipe = SignPipeline(ScriptedDetector([tagged] * 3), tracker=SignTracker(confirm_frames=3))
+    events = [pipe.update(None)[0] for _ in range(3)]
+    assert [e.get("sign_seen") for e in events] == [None, None, "speed_limit"]
+    # ...and the preview still sees all three
+    assert len(pipe.update(None)[1]) == 0        # detector is exhausted now
+    seen = SignPipeline(ScriptedDetector([tagged]), tracker=SignTracker()).update(None)[1]
+    assert [d["stage"] for d in seen] == ["shown", "other", "v3_quiet", "m1_only"]
+
+
+def test_untagged_detections_still_publish():
+    """b01 (the non-v3 stack) emits no stage field: it must behave as before."""
+    frames = [[box("stop")]] * 3
+    pipe = SignPipeline(ScriptedDetector(frames), tracker=SignTracker(confirm_frames=3))
+    assert [pipe.update(None)[0].get("sign_seen") for _ in range(3)][-1] == "stop"

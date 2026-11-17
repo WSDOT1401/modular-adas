@@ -1,5 +1,9 @@
 """sign_v3 glue, without the models: the crop matches run.py's byte for byte,
-and only readable boxes that M2 names as displayed signs come out."""
+and every box M1 found comes out tagged with how far down the chain it got.
+
+Only ``stage == "shown"`` may ever be announced. The detector no longer drops
+the others -- the preview draws them -- so the guard that used to live here is
+now test_signs.py::test_only_shown_stage_is_published."""
 import numpy as np
 import pytest
 
@@ -67,15 +71,22 @@ FRAME = np.zeros((480, 640, 3), np.uint8)
 
 
 def test_small_boxes_never_reach_m2():
+    """The point of READABLE: M2 is asked about one box, not two."""
     m2 = M2(["stop"])
     out = V3Detector(M1([det(READABLE - 1), det(READABLE, 60)]), m2).detect(FRAME)
-    assert m2.seen == 1 and [d["name"] for d in out] == ["stop"]
+    assert m2.seen == 1
+    assert [(d["name"], d["stage"]) for d in out] == [("too_small", "m1_only"), ("stop", "shown")]
 
 
-def test_only_displayed_classes_come_out():
-    m2 = M2(["not_a_sign", "other_warning", "speed_limit"])
-    out = V3Detector(M1([det(40), det(40), det(40)]), m2).detect(FRAME)
-    assert [(d["name"], d["score"]) for d in out] == [("speed_limit", 0.9)]
+def test_every_box_comes_out_tagged_by_stage():
+    m2 = M2(["not_a_sign", "other_warning", "speed_limit", "information"])
+    out = V3Detector(M1([det(40)] * 4), m2).detect(FRAME)
+    # information is a displayed class but classes.IGNORED drops it, so the
+    # driver never hears it: green would be a lie. It must come out quiet.
+    assert [(d["name"], d["stage"]) for d in out] == [
+        ("not_a_sign", "other"), ("other_warning", "other"),
+        ("speed_limit", "shown"), ("information", "v3_quiet")]
+    assert [d["score"] for d in out] == [0.9] * 4
 
 
 def test_pipelined_m1_hands_its_older_frame_on():

@@ -23,8 +23,11 @@ from typing import List, Optional, Tuple
 
 import numpy as np  # type: ignore
 
+from signs.classes import publishable
+
 READABLE = 24       # source px, short side: the smallest crop M2 was trained on
 NOT_A_SIGN = "not_a_sign"
+TOO_SMALL = "too_small"      # M1 found it, but under READABLE px: M2 never saw it
 
 
 def square_crop(frame: "np.ndarray", box, size: int) -> "np.ndarray":
@@ -112,15 +115,35 @@ class V3Detector:
         return self._name(frame, self._m1.detect(frame))
 
     def _name(self, frame: "np.ndarray", boxes: "List[dict]") -> "List[dict]":
-        keep = [d for d in boxes
-                if min(d["box"][2] - d["box"][0], d["box"][3] - d["box"][1]) >= READABLE]
-        if not keep:
-            return []
-        crops = [square_crop(frame, d["box"], self._m2.size) for d in keep]
-        out = []
-        for d, (name, conf) in zip(keep, self._m2.classify(crops)):
-            if name in self.displayed:
-                out.append({"name": name, "box": d["box"], "score": conf})
+        """Every box M1 found, each tagged with how far down the chain it got.
+
+        ``stage`` is for the preview only -- pipeline.py publishes ``shown``
+        and nothing else. Keeping the rest costs one dict per box and makes the
+        live view show *why* a sign never reached the driver, which is
+        otherwise invisible: the box simply is not drawn.
+
+          ``m1_only``   under READABLE px, so M2 was never asked
+          ``other``     M2 named it, but it is not one of v3's displayed
+                        classes -- proof the pipeline sees it, nothing more
+          ``v3_quiet``  a displayed class the dash still never announces
+                        (``information``, via classes.IGNORED)
+          ``shown``     the driver gets told
+        """
+        keep, small = [], []
+        for d in boxes:
+            side = min(d["box"][2] - d["box"][0], d["box"][3] - d["box"][1])
+            (keep if side >= READABLE else small).append(d)
+        out = [{"name": TOO_SMALL, "box": d["box"], "score": float(d.get("score", 0.0)),
+                "stage": "m1_only"} for d in small]
+        if keep:
+            crops = [square_crop(frame, d["box"], self._m2.size) for d in keep]
+            for d, (name, conf) in zip(keep, self._m2.classify(crops)):
+                if name not in self.displayed:
+                    stage = "other"
+                else:
+                    stage = "shown" if publishable(name) else "v3_quiet"
+                out.append({"name": name, "box": d["box"], "score": conf,
+                            "stage": stage})
         return out
 
     def close(self) -> None:

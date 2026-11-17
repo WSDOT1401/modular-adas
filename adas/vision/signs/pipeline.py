@@ -41,8 +41,9 @@ class SignPipeline:
         return self._detector
 
     def update(self, frame) -> "Tuple[dict, List[dict]]":
-        """Process one frame. Returns ``(keys to publish, detections)``; the
-        detections are for drawing a preview.
+        """Process one frame. Returns ``(keys to publish, boxes)``. The boxes
+        are every box the detector found, tagged with ``stage``, and are for
+        drawing a preview only -- what gets published is filtered separately.
 
         A pipelined detector (the AI HAT's: ``push``) answers for a frame it
         was given a few calls ago and hands that frame back; the speed reader
@@ -55,7 +56,11 @@ class SignPipeline:
         else:
             raw = self._detector.detect(frame)
         self.frame = frame
-        detections = [d for d in raw if publishable(d["name"])]
+        # "shown" is the only stage that may reach the driver. The others exist
+        # so the preview can draw them; letting one through here would announce
+        # a class the dash is configured never to show.
+        detections = [d for d in raw
+                      if d.get("stage", "shown") == "shown" and publishable(d["name"])]
         out: dict = {}
 
         for name in self._tracker.update(d["name"] for d in detections):
@@ -75,7 +80,7 @@ class SignPipeline:
 
         if SIGN_SEEN not in out and self._pending:
             out[SIGN_SEEN] = self._pending.popleft()
-        return out, detections
+        return out, raw            # raw, not detections: the preview draws every box
 
     def close(self) -> None:
         """Release the detector's device (the AI HAT: left to the garbage

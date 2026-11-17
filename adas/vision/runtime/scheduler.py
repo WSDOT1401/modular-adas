@@ -227,12 +227,17 @@ class Scheduler:
         """Draw this frame's boxes in a window. False when the user quits (q/Esc)."""
         import cv2  # type: ignore
 
+        from runtime.preview import LABELLED, style
+
         view = frame.copy()
-        for d in detections:
+        for d in sorted(detections, key=lambda b: b.get("stage", "shown") == "shown"):
             x0, y0, x1, y1 = (int(v) for v in d["box"])
-            cv2.rectangle(view, (x0, y0), (x1, y1), (80, 210, 140), 2)
+            colour, w = style(d, 4)
+            cv2.rectangle(view, (x0, y0), (x1, y1), colour, w)
+            if d.get("stage", "shown") not in LABELLED:
+                continue
             cv2.putText(view, f"{d['name']} {d['score']:.2f}", (x0, max(0, y0 - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (80, 210, 140), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, max(1, w - 1))
         scale = 960 / view.shape[1] if view.shape[1] > 960 else 1.0
         if scale != 1.0:
             view = cv2.resize(view, None, fx=scale, fy=scale)
