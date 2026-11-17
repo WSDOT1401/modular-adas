@@ -1,16 +1,21 @@
 [Unit]
 Description=Modular ADAS display
 # A user service (systemctl --user): runs as whoever is logged in to the
-# desktop, so it reaches the Wayland session. Retry until the desktop is up.
+# desktop, so it reaches the desktop session. Retry until the desktop is up.
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 # %h is the home folder; edit if the repo is not at ~/modular-adas.
 WorkingDirectory=%h/modular-adas/adas/display
-ExecStart=%h/modular-adas/adas/display/build/adas_display
+# --screen picks the monitor: auto takes the square (round) one when several
+# are connected, else the one that isn't primary; or name it, e.g.
+# --screen HDMI-A-2 (see --list-screens).
+ExecStart=%h/modular-adas/adas/display/build/adas_display --screen auto
 Restart=always
 RestartSec=2
+# A Wayland window, not X11: X11 windows share one X server (XWayland), and
+# a busy one there (the stats window's video) holds the display's frames up.
 Environment=QT_QPA_PLATFORM=wayland
 Environment=WAYLAND_DISPLAY=wayland-0
 

@@ -5,7 +5,9 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 WorkingDirectory=%h/modular-adas
-ExecStart=/usr/bin/python3 %h/modular-adas/adas/display/input/rotary_encoder.py
+# --reverse: this car's encoder reports its direction the other way round
+# (common on KY-040 boards). Remove it if turning right moves the menu up.
+ExecStart=/usr/bin/python3 %h/modular-adas/adas/display/input/rotary_encoder.py --reverse
 Restart=always
 RestartSec=2
 

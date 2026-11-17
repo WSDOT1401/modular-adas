@@ -25,6 +25,8 @@ from typing import Iterable, List, Optional, Tuple
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9100
+# The reverse direction: the display tells the ADAS what the driver chose.
+DEFAULT_CONTROL_PORT = 9102
 TARGETS_ENV = "ADAS_UDP_TARGETS"
 
 Target = Tuple[str, int]

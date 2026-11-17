@@ -33,6 +33,7 @@ reads the vehicle keys in `VehicleState::applyJson()`).
 | `module_status` | object | `{"lane"/"fcw"/"signs": "on"/"paused"/"off"}` | vision, every cycle | display |
 | `system_fault` | string | `""` or a fault id, e.g. `camera_blocked` | vision | display |
 | `input` | string | `rotate_cw`/`rotate_ccw`/`press`/`long_press` (one per event) | rotary encoder, buttons | display |
+| `feature_enable` | object | `{lane, fcw, signs}`: true = switched on by the driver | display (menu) | vision, on **udp 9102** |
 
 > ⚠️ **Unknown keys are silently dropped** by every consumer. Import the
 > constants from `adas_protocol` instead of typing key strings. Translate
@@ -47,6 +48,12 @@ run on one Pi (e.g. the W124 cluster on 9100 and the display on 9101), set
 `ADAS_UDP_TARGETS=127.0.0.1:9100,127.0.0.1:9101` for the producers;
 `UdpPublisher` then sends every datagram to each target.
 
+**The control channel — `udp://127.0.0.1:9102`.** The one message going the
+other way: the display sends `feature_enable` (the driver's menu choices) on
+every change and once a second, so a restarted vision service catches up. The
+vision service skips a switched-off stage and reports it as `"off"` in
+`module_status`. Port: `adas_protocol.DEFAULT_CONTROL_PORT`.
+
 The machine-readable spec is [`schema/vehicle_state.schema.json`](schema/vehicle_state.schema.json)
 (`additionalProperties: false`, so validating a producer's payload against it
 catches misspelled keys before they vanish on the wire).
@@ -58,6 +65,7 @@ CarPlay uses its own TCP channels, not the UDP vehicle-state contract:
 | Port | Proto | Purpose |
 |------|-------|---------|
 | 9100 | UDP | vehicle state (this contract) |
+| 9102 | UDP | driver's feature choices, display -> vision (this contract) |
 | 9001 | TCP | CarPlay H.264 video |
 | 9002 | TCP | CarPlay touch events |
 | 9003 | TCP | CarPlay status (also mirrored to `carplay_status.json`) |

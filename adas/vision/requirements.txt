@@ -1,10 +1,18 @@
-# Lane-departure runtime deps.
+# Vision service runtime deps.
 #
 # Install the shared protocol lib (editable) from the repo root first:
 #   pip install -e adas/protocol/python
 #
 numpy>=1.24
 opencv-python>=4.8
+#
+# Traffic signs: the b01 detector (ultralytics YOLO) and the speed reader
+# (torchvision MobileNetV3). Weights are not in git: see
+# adas/experiments/central/README.md.
+ultralytics>=8.3
+torch>=2.2
+torchvision>=0.17
+pillow>=10
 #
 # Pi only (CSI camera). Not needed for off-Pi / file-replay development:
 # picamera2 ; platform_machine == "aarch64"

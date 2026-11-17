@@ -1,36 +1,88 @@
 #!/usr/bin/env python3
-"""Vision service — entry point (lane departure; signs to come).
+"""Vision service — entry point (traffic signs today; lane to come).
 
-Runs as a separate Pi process: acquires camera frames, detects lane position,
-and PUSHES warning events as JSON over UDP to 127.0.0.1:9100 (the shared
-vehicle-state contract — see adas/protocol). It never writes files, to spare
-the SD card.
+Runs as a separate Pi process: acquires camera frames (or replays a dashcam
+clip), runs the enabled stages, and PUSHES the results as JSON over UDP to the
+ADAS display (the shared vehicle-state contract — see adas/protocol). It never
+writes files, to spare the SD card.
 
 Usage:
-    python3 main.py                  # use config.SOURCE (camera by default)
-    python3 main.py --source=file    # replay config.CLIP_PATH instead
+    python main.py                                   # camera (Pi)
+    python main.py --source file --clip drive.mp4    # replay a dashcam clip
+    python main.py --source file --clip drive.mp4 --preview   # ...and show the boxes
+    python main.py --source file --clip drive.mp4 --display 192.168.1.50
+        # models here (a laptop), display on the Pi at that address; run the
+        # display there with --vision-host <this machine's IP>
 
-Bench without a camera:
-    python3 tools/mock_lane_writer.py    # synthetic warnings -> cluster
+Bench without a camera or a model:
+    python tools/mock_lane_writer.py    # synthetic lane warnings
 """
 from __future__ import annotations
 
+import argparse
 import signal
 import sys
 
 import config
-from runtime.scheduler import Scheduler
 
 
 def main() -> int:
-    for arg in sys.argv[1:]:
-        if arg.startswith("--source="):
-            config.SOURCE = arg.split("=", 1)[1]
+    ap = argparse.ArgumentParser(description="ADAS vision service")
+    ap.add_argument("--source", choices=["camera", "file"], default=config.SOURCE)
+    ap.add_argument("--clip", default=None, help="dashcam clip for --source file")
+    ap.add_argument("--signs", choices=("v3", "b01"), default=config.SIGN_STACK,
+                    help="sign models: v3 = central/sign_v3 (M1 + M2, the default when it's "
+                         "there), b01 = the single b01 detector")
+    ap.add_argument("--weights", default=None, help="sign detector weights (b01.pt)")
+    ap.add_argument("--reader", default=None, help="speed reader weights (speed_reader.pt)")
+    ap.add_argument("--device", default=None, help='inference device: "cpu", "0" (CUDA), "mps"')
+    ap.add_argument("--stages", default=None, help="comma list of stages, e.g. signs,lane")
+    ap.add_argument("--every-frame", action="store_true",
+                    help="file: process every frame instead of keeping real time")
+    ap.add_argument("--loop", action="store_true", help="file: replay the clip forever")
+    ap.add_argument("--camera", choices=sorted(config.CAMERA_MODES), default="full",
+                    help="camera: full = 4608x2592 at 14 fps, binned = 2304x1296 at 30 fps")
+    ap.add_argument("--preview", action="store_true", help="show frames with the detected boxes")
+    ap.add_argument("--display", metavar="HOST", default=None,
+                    help="send to a display on another machine (e.g. the Pi's IP), "
+                         "and take its feature switches from the network")
+    ap.add_argument("--all-cores", action="store_true",
+                    help="don't keep a core free for the display (config.DISPLAY_CORES)")
+    args = ap.parse_args()
+
+    # Before anything starts a thread or loads OpenCV/PyTorch (runtime/priority.py).
+    # A display on another machine needs nothing kept free here.
+    if not (args.all_cores or args.display):
+        from runtime.priority import yield_to_display
+        print(f"vision: {yield_to_display(config.DISPLAY_CORES, config.VISION_NICE)}"
+              " (the rest left to the display)", flush=True)
+
+    config.SOURCE = args.source
+    config.SIGN_STACK = args.signs
+    config.FRAME_WIDTH, config.FRAME_HEIGHT, config.TARGET_FPS = config.CAMERA_MODES[args.camera]
+    if args.clip:
+        config.CLIP_PATH = args.clip
+    if args.weights:
+        config.SIGN_WEIGHTS = args.weights
+    if args.reader:
+        config.SPEED_READER = args.reader
+    if args.device:
+        config.SIGN_DEVICE = args.device
+    if args.stages is not None:
+        config.STAGES = tuple(s.strip() for s in args.stages.split(",") if s.strip())
+    if args.every_frame:
+        config.REPLAY_REALTIME = False
+    if args.loop:
+        config.REPLAY_LOOP = True
+    if args.display:
+        config.UDP_HOST = args.display
+        config.CONTROL_BIND = "0.0.0.0"
 
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
-    Scheduler().run()
+    from runtime.scheduler import Scheduler
+    Scheduler(preview=args.preview).run()
     return 0
 
 
