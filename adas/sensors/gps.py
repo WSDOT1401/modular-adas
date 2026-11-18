@@ -16,6 +16,12 @@ shows "--" after 3 s, never a made-up 0. GPS speed comes from the Doppler
 shift: close to the true ground speed when moving, but standing still it
 wanders by a km/h or two, so under ``--still`` km/h it reads 0.
 
+Its health goes to the display with it, once a second, as ``gps`` (the
+display's GPS icon): ``ok`` with each speed; ``no_fix`` while the module talks
+but has no lock; ``no_data`` after 3 s without a good RMC (a wire off, no
+power, the port missing). If this script itself stops, the display notices
+the silence and shows the GPS as not working too.
+
 Once a second the fix also goes to /dev/shm/adas-gps.json (RAM, not the SD
 card) for the stats screen (adas/vision/tools/stats_window.py, its header).
 
@@ -42,6 +48,7 @@ from typing import Optional
 GPS_FILE = Path("/dev/shm/adas-gps.json")       # adas/vision/tools/stats_window.py reads it
 KNOT_KMH = 1.852
 MODES = {"1": "no", "2": "2D", "3": "3D"}       # GSA's fix mode
+NO_DATA_S = 3.0                                 # no good RMC this long: the module is lost
 
 
 def valid(line: str) -> bool:
@@ -117,23 +124,41 @@ def main() -> int:
         _selfcheck()
         return 0
 
+    import time
+
     import serial  # type: ignore    # pyserial (python3-serial on the Pi)
-    from adas_protocol import SPEED, UdpPublisher
+    from adas_protocol import GPS, SPEED, UdpPublisher
 
     pub = UdpPublisher()
+    try:
+        port = serial.Serial(args.port, args.baud, timeout=1)
+    except serial.SerialException as e:
+        # No such port (UART switched off, wrong name): tell the display, and
+        # let the service restart us.
+        pub.send({GPS: "no_data"})
+        print(f"cannot open {args.port}: {e}", flush=True)
+        time.sleep(2)
+        return 1
+
     fix: dict = {}
-    with serial.Serial(args.port, args.baud, timeout=3) as port:
+    last_rmc = time.monotonic()                     # the last good RMC
+    last_lost = 0.0                                 # the last "no_data" sent
+    with port:
         while True:
-            raw = port.readline()
-            if not raw:                             # 3 s of nothing: unplugged or dead
+            raw = port.readline()                   # a line, or what came in 1 s
+            now = time.monotonic()
+            if raw and parse(raw.decode("ascii", "replace").strip(), fix):
+                last_rmc = now
+                kmh = speed(fix, args.still)
+                pub.send({SPEED: kmh, GPS: "ok"} if kmh is not None else {GPS: "no_fix"})
+                write(fix)
+            elif now - last_rmc > NO_DATA_S and now - last_lost >= 1.0:
+                # No good RMC for 3 s: silence (TX wire off, no power) or only
+                # garbage (GND off, wrong baud). Said once a second, like "ok".
+                last_lost = now
                 fix.clear()
                 write(None)
-                continue
-            if parse(raw.decode("ascii", "replace").strip(), fix):
-                kmh = speed(fix, args.still)
-                if kmh is not None:
-                    pub.send({SPEED: kmh})
-                write(fix)
+                pub.send({GPS: "no_data"})
 
 
 def _sentence(body: str) -> str:

@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption windowedOpt("windowed", "Run in a window instead of full screen.");
     const QCommandLineOption scenarioOpt("scenario",
         "Play a built-in scenario instead of waiting for data: cruise, lane_left, lane_right, "
-        "fcw, overspeed, new_sign, fault, feature_off, following, or cycle.", "name");
+        "fcw, overspeed, new_sign, fault, feature_off, following, gps_no_fix, gps_lost, or cycle.", "name");
     const QCommandLineOption snapshotOpt("snapshot", "Save the screen to a PNG after start-up, then quit.", "file");
     const QCommandLineOption screenOpt("screen",
         "Monitor to run on: an output name from --list-screens (e.g. HDMI-A-2), a number, "

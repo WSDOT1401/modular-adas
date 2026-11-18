@@ -88,13 +88,25 @@ Item {
             font.pixelSize: 112
             font.weight: Font.Medium
         }
-        Text {
+        Item {
             width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: "KM/H"
-            color: Theme.textDim
-            font.pixelSize: 18
-            font.letterSpacing: 2
+            height: kmh.height
+            Text {
+                id: kmh
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: "KM/H"
+                color: Theme.textDim
+                font.pixelSize: 18
+                font.letterSpacing: 2
+            }
+            // where the speed comes from: the GPS, and whether it can be trusted
+            GpsIcon {
+                x: parent.width / 2 + 44
+                anchors.verticalCenter: kmh.verticalCenter
+                status: st.gpsStatus
+                size: 30
+            }
         }
     }
     // safety features in use: green on, amber unavailable, struck-through off

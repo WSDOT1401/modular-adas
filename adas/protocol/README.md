@@ -22,6 +22,7 @@ reads the vehicle keys in `VehicleState::applyJson()`).
 | `oil_temp` | number | °C | sensors | W124 cluster |
 | `outside_temp` | number | °C | sensors | W124 cluster |
 | `voltage` | number | V | sensors | W124 cluster |
+| `gps` | string | `ok` (locked) / `no_fix` (no satellite lock) / `no_data` (nothing from the module), once a second | GPS (`adas/sensors/gps.py`) | display |
 | `lane_warning` | boolean | departure detected | vision | display |
 | `lane_direction` | string | `left`/`right`/`none` | vision | display |
 | `lane_confidence` | number | 0..1 | vision | (liveness only) |

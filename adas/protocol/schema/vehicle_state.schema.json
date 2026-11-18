@@ -12,6 +12,7 @@
     "oil_temp":     { "type": "number", "description": "oil temperature, deg C" },
     "outside_temp": { "type": "number", "description": "outside temperature, deg C" },
     "voltage":      { "type": "number", "minimum": 0, "description": "battery voltage, V" },
+    "gps":          { "type": "string", "enum": ["ok", "no_fix", "no_data"], "description": "GPS health, once a second: ok = locked; no_fix = talking, no satellite lock; no_data = nothing valid from the module (wire off, no power)" },
 
     "lane_warning":    { "type": "boolean", "description": "ADAS: lane departure detected" },
     "lane_direction":  { "type": "string", "enum": ["left", "right", "none"], "description": "ADAS: drift direction" },
