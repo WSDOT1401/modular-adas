@@ -1,0 +1,14 @@
+[Unit]
+Description=Modular ADAS GPS speed
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/modular-adas
+# /dev/ttyAMA0 = header pins 8/10 on a Pi 5 (needs dtparam=uart0=on).
+ExecStart=/usr/bin/python3 %h/modular-adas/adas/sensors/gps_speed.py --device /dev/ttyAMA0
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
