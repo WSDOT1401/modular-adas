@@ -17,6 +17,37 @@ soon, lane position) → decide on a warning → **push the event over UDP to
   `config.STAGES` yet and the display shows it as switched off.
 - **Forward collision:** not started; reads "off".
 
+## Operating conditions
+
+**Daylight only.** Sign recognition is reliable in good light and falls off
+badly as the light goes. Observed on the road on 2026-11-18, driving at
+40–60 km/h past signs around 18:00: M1 misses speed-limit signs entirely, and
+where it does find a sign M2 often names a neighbouring class (a t-junction
+read as turn-right, or right-curve). This is the system's operating limit,
+not a bug: both models were trained, and INT8-calibrated for the HAT, on
+daylight frames only, so dusk is a scene neither has ever seen.
+
+Three things in this code turn that fall-off into silence rather than a
+graceful decline. Worth knowing before debugging a missed sign at dusk:
+
+- **Exposure is uncapped at 14 fps.** `capture/picamera2_source.py` sets only
+  `FrameRate`, so at `config.TARGET_FPS = 14` the auto-exposure may use the
+  whole 71 ms frame. At 50 km/h the car travels about a metre in that time
+  and the sign smears. M1 is often failing on a blurred sign, not a dark one.
+- **M2 cannot abstain.** `signs/v3.py` records M2's confidence as `score` and
+  `signs/pipeline.py` never reads it, so the top class is published whatever
+  its confidence. A washed-out crop lands on the nearest-looking class
+  instead of on nothing.
+- **The tracker needs three hits.** `SignTracker` fires at
+  `confirm_frames = 3`, and M1 finds a sign in roughly one frame in three in
+  good light. Halve that at dusk and a sign that *was* detected twice is
+  dropped without a trace.
+
+To tell them apart, replay a dusk clip and watch the preview, which draws
+every box colour-coded by how far down the chain it got: boxes drawn but
+nothing announced is the last two, software only; no boxes at all is the
+exposure.
+
 ## Layout
 
 ```
