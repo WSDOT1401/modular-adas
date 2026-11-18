@@ -14,8 +14,14 @@ TRIP = "trip"                  # km, trip meter (wraps at 1000)
 OIL_TEMP = "oil_temp"          # deg C
 OUTSIDE_TEMP = "outside_temp"  # deg C
 VOLTAGE = "voltage"            # volts
+# Health of the GPS that the speed comes from, sent once a second with it:
+#   ok       locked, speed is being sent
+#   no_fix   the module talks but has no satellite lock (indoors, just powered)
+#   no_data  nothing valid from the module: a wire off, no power, port missing
+GPS = "gps"
+GPS_STATES = ("ok", "no_fix", "no_data")
 
-VEHICLE_KEYS = frozenset({SPEED, ODO, TRIP, OIL_TEMP, OUTSIDE_TEMP, VOLTAGE})
+VEHICLE_KEYS = frozenset({SPEED, ODO, TRIP, OIL_TEMP, OUTSIDE_TEMP, VOLTAGE, GPS})
 
 # --- ADAS / lane departure (consumed by adas/display) ---------------------
 LANE_WARNING = "lane_warning"        # bool  — departure detected, should alert

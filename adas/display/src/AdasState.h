@@ -26,6 +26,9 @@ class AdasState : public QObject {
     Q_OBJECT
     Q_PROPERTY(double speed READ speed NOTIFY changed)
     Q_PROPERTY(bool hasSpeed READ hasSpeed NOTIFY changed)
+    // GPS health for its icon: "" (no GPS heard since start: icon hidden),
+    // "ok", "no_fix", or "no_data" (the GPS said so, or went quiet).
+    Q_PROPERTY(QString gpsStatus READ gpsStatus NOTIFY changed)
     Q_PROPERTY(int speedLimit READ speedLimit NOTIFY changed)
     Q_PROPERTY(bool overspeed READ overspeed NOTIFY changed)
     Q_PROPERTY(bool laneWarning READ laneWarning NOTIFY changed)
@@ -53,6 +56,9 @@ public:
     // How long data stays valid without a fresh datagram.
     static constexpr qint64 kSpeedStaleMs = 3000;
     static constexpr qint64 kAdasStaleMs = 3000;
+    // The GPS reports once a second; this long without a word, it's lost
+    // (its reader stopped, or its datagrams stopped arriving).
+    static constexpr qint64 kGpsStaleMs = 3500;
     // How long a newly read sign is announced.
     static constexpr qint64 kSignShowMs = 8000;
     // km/h above the limit before "over the limit" shows.
@@ -71,6 +77,7 @@ public:
 
     double speed() const { return m_speed; }
     bool hasSpeed() const { return m_hasSpeed; }
+    QString gpsStatus() const { return m_gpsStatus; }
     int speedLimit() const { return m_signsOn ? m_speedLimit : 0; }
     bool overspeed() const { return m_overspeed; }
     bool laneWarning() const { return m_laneWarning && m_adasOnline && m_laneOn; }
@@ -130,6 +137,8 @@ private:
 
     double m_speed = 0.0;
     qint64 m_speedAt = -1;
+    QString m_gps;
+    qint64 m_gpsAt = -1;
     int m_speedLimit = 0;
     bool m_laneWarning = false;
     QString m_laneDirection = QStringLiteral("none");
@@ -151,6 +160,7 @@ private:
 
     // Derived in recompute().
     bool m_hasSpeed = false;
+    QString m_gpsStatus;
     bool m_overspeed = false;
     bool m_signFresh = false;
     bool m_adasOnline = false;

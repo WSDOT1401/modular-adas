@@ -23,6 +23,7 @@ def test_schema_enums_match_python():
     props = SCHEMA["properties"]
     assert tuple(props["lane_direction"]["enum"]) == ap.LANE_DIRECTIONS
     assert tuple(props["input"]["enum"]) == ap.INPUT_EVENTS
+    assert tuple(props["gps"]["enum"]) == ap.GPS_STATES
     modules = props["module_status"]["properties"]
     assert tuple(modules) == ap.MODULES
     for spec in modules.values():

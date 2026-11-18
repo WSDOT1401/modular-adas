@@ -134,6 +134,14 @@ Item {
         font.pixelSize: 18
         font.letterSpacing: 2
     }
+    // where the speed comes from: the GPS, and whether it can be trusted
+    GpsIcon {
+        x: 404
+        y: 276
+        visible: !root.fcw && status !== ""
+        status: st.gpsStatus
+        size: 28
+    }
     Text {
         y: 168
         width: parent.width

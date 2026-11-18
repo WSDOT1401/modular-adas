@@ -18,12 +18,13 @@ import itertools
 import time
 
 from adas_protocol import (
-    FCW_TTC, FCW_WARNING, INPUT, LEAD_VEHICLE, INPUT_EVENTS, LANE_DIRECTION, LANE_WARNING,
+    FCW_TTC, FCW_WARNING, GPS, INPUT, LEAD_VEHICLE, INPUT_EVENTS, LANE_DIRECTION, LANE_WARNING,
     MODULE_STATUS, SIGN_SEEN, SPEED, SPEED_LIMIT, SYSTEM_FAULT, UdpPublisher,
 )
 
 BASE = {
     SPEED: 82,
+    GPS: "ok",
     SPEED_LIMIT: 90,
     LANE_WARNING: False,
     LANE_DIRECTION: "none",
@@ -48,13 +49,16 @@ CHANGES = {
         MODULE_STATUS: {"lane": "paused", "fcw": "paused", "signs": "paused"},
     },
     "feature_off": {MODULE_STATUS: {"lane": "off", "fcw": "on", "signs": "on"}},
+    # None drops the key: without a lock or a module there is no speed to send.
+    "gps_no_fix": {SPEED: None, GPS: "no_fix"},
+    "gps_lost": {SPEED: None, GPS: "no_data"},
 }
 
 
 def payload(name: str) -> dict:
     p = copy.deepcopy(BASE)
     p.update(copy.deepcopy(CHANGES[name]))
-    return p
+    return {k: v for k, v in p.items() if v is not None}
 
 
 def main() -> int:

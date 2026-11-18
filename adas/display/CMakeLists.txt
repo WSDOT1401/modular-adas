@@ -28,6 +28,7 @@ set(QML_SOURCES
     qml/CarRear.qml
     qml/FeatureIcon.qml
     qml/CameraOffIcon.qml
+    qml/GpsIcon.qml
     qml/SignIcon.qml
     qml/AlertIcon.qml
     qml/SettingsMenu.qml

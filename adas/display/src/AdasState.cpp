@@ -77,6 +77,10 @@ void AdasState::applyJson(const QJsonObject& obj) {
         m_speed = obj.value(QLatin1String("speed")).toDouble();
         m_speedAt = now;
     }
+    if (obj.contains(QLatin1String("gps"))) {
+        m_gps = obj.value(QLatin1String("gps")).toString();
+        m_gpsAt = now;
+    }
     if (obj.contains(QLatin1String("lane_warning"))) {
         m_laneWarning = obj.value(QLatin1String("lane_warning")).toBool();
         adas = true;
@@ -188,6 +192,15 @@ void AdasState::recompute() {
 
     m_adasOnline = m_adasAt >= 0 && now - m_adasAt < kAdasStaleMs;
     m_hasSpeed = m_speedAt >= 0 && now - m_speedAt < kSpeedStaleMs;
+    // Once a GPS has been heard, silence means it stopped working.
+    if (m_gpsAt < 0)
+        m_gpsStatus.clear();
+    else if (now - m_gpsAt >= kGpsStaleMs)
+        m_gpsStatus = QStringLiteral("no_data");
+    else if (m_gps == QLatin1String("ok") || m_gps == QLatin1String("no_fix"))
+        m_gpsStatus = m_gps;
+    else
+        m_gpsStatus = QStringLiteral("no_data");
     // A feature the driver switched off shows nothing, alerts included.
     m_signFresh = m_signsOn && !m_signSeen.isEmpty() && m_signAt >= 0 && now - m_signAt < kSignShowMs;
     m_overspeed = m_hasSpeed && speedLimit() > 0 && m_speed > speedLimit() + kOverspeedMargin;

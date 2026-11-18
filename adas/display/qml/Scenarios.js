@@ -3,11 +3,13 @@
 // Bench scenarios, matching tools/demo_sender.py. Each is a full datagram, so
 // replaying one every second also keeps the ADAS "online".
 
-var names = ["cruise", "lane_left", "lane_right", "fcw", "overspeed", "new_sign", "fault", "feature_off", "following"]
+var names = ["cruise", "lane_left", "lane_right", "fcw", "overspeed", "new_sign", "fault", "feature_off", "following",
+             "gps_no_fix", "gps_lost"]
 
 function payload(name) {
     var p = {
         speed: 82,
+        gps: "ok",
         speed_limit: 90,
         lane_warning: false,
         lane_direction: "none",
@@ -34,6 +36,10 @@ function payload(name) {
         break
     case "following":
         p.speed = 74; p.lead_vehicle = true; break
+    case "gps_no_fix":   // indoors / just powered: no speed until it locks
+        delete p.speed; p.gps = "no_fix"; break
+    case "gps_lost":     // a wire slipped off
+        delete p.speed; p.gps = "no_data"; break
     case "feature_off":
         p.module_status = { lane: "off", fcw: "on", signs: "on" }; break
     }
