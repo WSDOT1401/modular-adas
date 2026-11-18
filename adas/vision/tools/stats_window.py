@@ -16,8 +16,14 @@ monitor you name, with the last two minutes as a graph:
   Video    what the vision service sees, with its boxes, beside the figures
            (runtime/preview.py). The window asks for it, in the size it
            wants, so a Pi with no stats screen never makes it.
+  GPS      fix, satellites and speed, in the header (adas/sensors/gps.py)
 
-On the Pi, next to the ADAS display on the round screen:
+On another machine (a Mac beside the car), reading tools/stats_server.py on
+the Pi over the network, so the Pi only drives the round screen:
+
+    python3 tools/stats_window.py --pi 172.20.10.2 --windowed
+
+On the Pi itself, next to the ADAS display on the round screen:
 
     python3 tools/stats_window.py                 # full screen beside the round screen
     python3 tools/stats_window.py --windowed      # a window instead
@@ -25,7 +31,9 @@ On the Pi, next to the ADAS display on the round screen:
 
 Peaks (watts, temperatures, the supply's high and low) run from when the
 window opened; r resets them. q or Esc closes it. Plain Python with GTK 3
-(python3-gi, part of the Raspberry Pi OS desktop): it doesn't need the venv.
+(python3-gi, part of the Raspberry Pi OS desktop; on a Mac
+``brew install gtk+3 pygobject3`` and Homebrew's python3): it doesn't need
+the venv.
 GTK, not Tk, because a GTK window is a Wayland one: a Tk window goes through
 XWayland, and the video drawn there held the driver's display up to ~10
 frames a second (vision README, "Room for the display"). The AI HAT's load is
@@ -39,15 +47,21 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import time
+import urllib.request
 from collections import deque
+from http.client import HTTPException
 from pathlib import Path
 
 STATS_FILE = Path("/dev/shm/adas-stats.json")     # runtime/health.py writes it
 FRAME_FILE = Path("/dev/shm/adas-frame.ppm")      # runtime/preview.py writes it
 WANT_FILE = Path("/dev/shm/adas-frame.want")      # ... at the size asked for here
+GPS_FILE = Path("/dev/shm/adas-gps.json")         # adas/sensors/gps.py writes it
+PORT = 8090                                        # tools/stats_server.py
 FRAME_MS = 66                                      # look for a new frame ~15 times a second
 STALE_S = 3.0
 HISTORY = 120                                      # seconds on the graphs
@@ -173,6 +187,76 @@ def read() -> "dict | None":
     return stats if time.time() - stats.get("time", 0) < STALE_S else None
 
 
+def gps() -> "dict | None":
+    """The GPS fix, or None when gps.py isn't running or the module is quiet."""
+    try:
+        if time.time() - GPS_FILE.stat().st_mtime > STALE_S:
+            return None
+        return json.loads(GPS_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def snapshot() -> dict:
+    """Everything but the video, read on this machine: the Pi. Every age is
+    judged here, against the Pi's clock, so a window on another machine
+    (stats_server.py sends it this dict) needn't share the Pi's time."""
+    return {"stats": read(), "power": power(), "soc": soc_temp(), "gps": gps()}
+
+
+def gps_text(g: "dict | None") -> "tuple[str, str]":
+    """The header's GPS line and its colour: amber until it has a fix."""
+    if g is None:
+        return "GPS --", DIM
+    sats = f"{g.get('sats_used') or 0}/{g.get('sats_in_view') or 0} sats"
+    if not g.get("fix"):
+        return f"GPS no fix  ·  {sats}", CAUTION
+    kmh = g.get("speed_kmh")
+    return (f"GPS {g.get('mode', '')} fix  ·  {sats}  ·  "
+            + ("--" if kmh is None else f"{kmh:.0f} km/h")), TEXT
+
+
+class Remote:
+    """The same figures and video from tools/stats_server.py on the Pi, fetched
+    in threads of their own: a slow hotspot then delays a frame, never the
+    window. The window takes whatever arrived last."""
+
+    def __init__(self, host: str) -> None:
+        name, _, port = host.partition(":")
+        # IPv4 only: w124.local also resolves to an IPv6 link-local address,
+        # and every request would sit out its timeout there first.
+        self.base = f"http://{socket.gethostbyname(name)}:{port or PORT}"
+        self.snap: dict = {}
+        self.frame: "tuple[bytes, float] | None" = None   # JPEG, monotonic time it came
+        self.size: "tuple[int, int] | None" = None        # set by the window
+        for loop in (self._stats, self._frames):
+            threading.Thread(target=loop, daemon=True).start()
+
+    def _get(self, path: str) -> "tuple[int, bytes]":
+        with urllib.request.urlopen(self.base + path, timeout=2) as r:
+            return r.status, r.read()
+
+    def _stats(self) -> None:
+        while True:
+            try:
+                self.snap = json.loads(self._get("/stats")[1])
+            except (OSError, ValueError, HTTPException):
+                self.snap = {}                             # the Pi or its server is down
+            time.sleep(1.0)
+
+    def _frames(self) -> None:
+        while True:
+            t = time.monotonic()
+            if self.size is not None:
+                try:
+                    status, body = self._get("/frame?w=%d&h=%d" % self.size)
+                    if status == 200:
+                        self.frame = (body, time.monotonic())
+                except (OSError, HTTPException):
+                    pass
+            time.sleep(max(0.0, FRAME_MS / 1000 - (time.monotonic() - t)))
+
+
 def load_colour(v) -> str:
     return CAUTION if v is not None and v >= 0.9 else INFO
 
@@ -231,7 +315,7 @@ def rgb(colour: str) -> "tuple[float, float, float]":
 class StatsWindow:
     """The stats, drawn with cairo in a GTK 3 window (a Wayland one)."""
 
-    def __init__(self, fullscreen: bool) -> None:
+    def __init__(self, fullscreen: bool, remote: "Remote | None" = None) -> None:
         global Gdk, GdkPixbuf, GLib, Gtk, Pango, PangoCairo
         import gi  # type: ignore
 
@@ -240,9 +324,11 @@ class StatsWindow:
         gi.require_version("PangoCairo", "1.0")
         from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango, PangoCairo  # type: ignore
 
+        self.remote = remote
         self.stats: "dict | None" = None
         self.power: "dict | None" = None
         self.soc: "float | None" = None
+        self.gps: "dict | None" = None
         self.peaks = Peaks()
         self.hat = deque([None] * HISTORY, maxlen=HISTORY)
         self.cpu = deque([None] * HISTORY, maxlen=HISTORY)
@@ -285,9 +371,8 @@ class StatsWindow:
         return True
 
     def tick(self) -> bool:
-        self.stats = read()
-        self.power = power()
-        self.soc = soc_temp()
+        snap = self.remote.snap if self.remote else snapshot()
+        self.stats, self.power, self.soc, self.gps = (snap.get(k) for k in ("stats", "power", "soc", "gps"))
         if self.soc is None and self.stats:
             self.soc = self.stats.get("cpu_temp_c")
         self.peaks.update(self.stats, self.power, self.soc)
@@ -295,7 +380,7 @@ class StatsWindow:
         self.hat.append(s.get("hat_load"))
         self.cpu.append(s.get("cpu_load"))
         self.ask_for_video()
-        self.has_video = self.fresh_frame() is not None
+        self.has_video = self.frame_stamp() is not None
         self.area.queue_draw()
         return True
 
@@ -304,6 +389,9 @@ class StatsWindow:
         """Tell the vision service we're watching, and at what size. Every second:
         a stale request means no one is, and it stops making frames."""
         if self.video_size is None:
+            return
+        if self.remote:
+            self.remote.size = self.video_size                # sent with every frame request
             return
         try:
             WANT_FILE.write_text("%d %d\n" % self.video_size)
@@ -318,15 +406,30 @@ class StatsWindow:
             return None
         return mtime if time.time() - mtime < STALE_S else None
 
+    def frame_stamp(self) -> "float | None":
+        """When the newest frame came, while it's fresh; None when there's none."""
+        if not self.remote:
+            return self.fresh_frame()
+        got = self.remote.frame
+        return got[1] if got and time.monotonic() - got[1] < STALE_S else None
+
+    def load_frame(self):
+        if not self.remote:
+            return GdkPixbuf.Pixbuf.new_from_file(str(FRAME_FILE))
+        loader = GdkPixbuf.PixbufLoader()
+        loader.write(self.remote.frame[0])
+        loader.close()
+        return loader.get_pixbuf()
+
     def frame_tick(self) -> bool:
-        mtime = self.fresh_frame()
+        mtime = self.frame_stamp()
         if (mtime is not None) != self.has_video:           # the feed came or went: relayout
             self.has_video = mtime is not None
             self.area.queue_draw()
         if mtime is not None and mtime != self.frame_mtime:
             self.frame_mtime = mtime
             try:
-                self.pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(FRAME_FILE))
+                self.pixbuf = self.load_frame()
             except GLib.Error:                                # replaced mid-read: take the next
                 return True
             if self.video_at and self.has_video:
@@ -364,6 +467,7 @@ class StatsWindow:
         self.cr.set_source_rgb(*rgb(colour))
         self.cr.move_to(x, y)
         PangoCairo.show_layout(self.cr, layout)
+        return box.width
 
     def rect(self, x0, y0, x1, y1, fill=None, outline=None, width=1.0):
         cr = self.cr
@@ -460,10 +564,13 @@ class StatsWindow:
     def header(self, W, m) -> float:
         u, s = self.u, self.stats
         self.text(m, m * 0.8, "ADAS VISION", 26, TEXT, bold=True)
-        status = ("vision service not running" if s is None else
+        status = (f"no answer from {self.remote.base}" if self.remote and not self.remote.snap else
+                  "vision service not running" if s is None else
                   f"{s.get('source', '?')}   ·   pid {s.get('pid', '?')}   ·   "
                   f"{s.get('fps', 0):.1f} frames/s")
-        self.text(W - m, m * 0.8, status, 20, CAUTION if s is None else DIM, anchor="ne")
+        w = self.text(W - m, m * 0.8, status, 20, CAUTION if s is None else DIM, anchor="ne")
+        line, colour = gps_text(self.gps)
+        self.text(W - m - w - 64 * u, m * 0.8, line, 20, colour, anchor="ne")
         return m * 0.8 + 60 * u
 
     def hat_rows(self, s):
@@ -572,6 +679,8 @@ def main() -> int:
     ap.add_argument("--text", action="store_true", help="print to the terminal instead (ssh)")
     ap.add_argument("--all-cores", action="store_true",
                     help="don't keep off the display's cores (config.DISPLAY_CORES)")
+    ap.add_argument("--pi", metavar="HOST[:PORT]",
+                    help="run on another machine: read tools/stats_server.py on the Pi")
     args = ap.parse_args()
     if args.text:
         peaks = Peaks()
@@ -586,8 +695,8 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
     # Off the display's cores too, below it in priority: drawing the video
-    # here is real work (runtime/priority.py).
-    if not args.all_cores:
+    # here is real work (runtime/priority.py). Not on another machine.
+    if not args.all_cores and not args.pi:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         import config
         from runtime.priority import yield_to_display
@@ -598,7 +707,7 @@ def main() -> int:
     run = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
     if "WAYLAND_DISPLAY" not in os.environ and (run / "wayland-0").exists():
         os.environ.update(XDG_RUNTIME_DIR=str(run), WAYLAND_DISPLAY="wayland-0")
-    StatsWindow(fullscreen=not args.windowed)
+    StatsWindow(fullscreen=not args.windowed, remote=Remote(args.pi) if args.pi else None)
     Gtk.main()
     return 0
 

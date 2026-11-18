@@ -20,7 +20,7 @@ rotary encoder ─┘  {"input": "press"}, ...
 | Comes from | Keys | Notes |
 |---|---|---|
 | Vision service (`adas/vision`) | `lane_warning`, `lane_direction`, `fcw_warning`, `fcw_ttc`, `lead_vehicle`, `speed_limit`, `sign_seen`, `module_status`, `system_fault` | Send `module_status` every cycle: if no ADAS key arrives for 3 s the rim turns dashed and every feature icon shows as unavailable. |
-| Any speed source | `speed` | A gearbox sender, GPS, OBD or IMU-based estimate; whoever has it publishes it. Stale after 3 s, then shown as `--`. |
+| Any speed source | `speed` | A gearbox sender, GPS ([`adas/sensors/gps.py`](../sensors/gps.py), sends only while it has a fix), OBD or IMU-based estimate; whoever has it publishes it. Stale after 3 s, then shown as `--`. |
 | Driver controls | `input` = `rotate_cw`, `rotate_ccw`, `press`, `long_press` | The rotary encoder script below, a steering-wheel button, or a test script. |
 
 **Adding a sensor** (an MPU-6050 IMU, say): write a small process that reads it

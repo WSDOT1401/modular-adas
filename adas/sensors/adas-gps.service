@@ -1,0 +1,13 @@
+[Unit]
+Description=Modular ADAS GPS: speed to the display, the fix to the stats screen
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/modular-adas
+ExecStart=/usr/bin/python3 %h/modular-adas/adas/sensors/gps.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

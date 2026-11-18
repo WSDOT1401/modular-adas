@@ -4,10 +4,11 @@ A few times a second the frame the signs were found in goes to
 :data:`FRAME_FILE` in RAM, shrunk to fit and with the boxes drawn on it.
 Like the stats it never reaches the driver's display.
 
-Only while someone watches: the stats window writes the size it wants to
-:data:`WANT_FILE` every second, and without a fresh one nothing is drawn or
-written, so a Pi with no stats screen spends nothing on this. PPM, because
-Tk reads it without any packages and it costs no encoding.
+Only while someone watches: the stats window (or tools/stats_server.py, for
+a window on another machine) writes the size it wants to :data:`WANT_FILE`
+every second, and without a fresh one nothing is drawn or written, so a Pi
+with no stats screen spends nothing on this. PPM, because GTK reads it
+without any packages and it costs no encoding.
 """
 from __future__ import annotations
 

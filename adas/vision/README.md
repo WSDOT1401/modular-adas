@@ -47,6 +47,7 @@ runtime/
 tools/
   bench.py               a clip as the camera: vision + speed sim + display, one command
   stats_window.py        AI HAT and Pi load on a monitor of its own (btop can't see the HAT)
+  stats_server.py        the same figures and video over HTTP, for that window on a Mac
   export_hailo.py        compile a YOLO (b01, sign_v3's M1) for the AI HAT (in WSL / Linux x86_64)
   export_m2_hailo.py     compile sign_v3's M2 classifier for the AI HAT (same place)
   mock_lane_writer.py    synthetic warnings over UDP (works, no camera)
@@ -134,12 +135,16 @@ binned sees each sign in twice as many frames. b01 on the Pi's CPU alone:
 btop doesn't show the HAT. The vision service writes its load figures
 (AI HAT load, fps, time per frame and chip temperature; Pi CPU per core,
 memory and SoC temperature) to `/dev/shm/adas-stats.json` once a second, and
-`tools/stats_window.py` shows them, with two minutes of history, full screen
-on the other monitor. They never go to the driver's display.
+`tools/stats_window.py` shows them, with two minutes of history, the video
+and the GPS fix, on a screen of its own. They never go to the driver's
+display. The window runs on a Mac beside the car, reading
+`tools/stats_server.py` on the Pi (`adas/tools/pi_start.sh` starts it), so
+the Pi only drives the round screen; it can also run on the Pi's other monitor.
 
 ```bash
-python3 tools/stats_window.py               # full screen beside the round screen
-python3 tools/stats_window.py --text          # in a terminal, e.g. over ssh
+python3 tools/stats_window.py --pi 172.20.10.2 --windowed   # on the Mac (brew install gtk+3 pygobject3)
+python3 tools/stats_window.py               # on the Pi: full screen beside the round screen
+python3 tools/stats_window.py --text          # on the Pi, in a terminal, e.g. over ssh
 ```
 
 ### Room for the display
